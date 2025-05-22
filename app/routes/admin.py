@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.config.database import users_collection, reports_collection
 from app.dependencies.auth import get_current_admin_user
-from app.firebase_admin_config import firebase_auth
+from firebase_admin import auth as firebase_auth
 from typing import List, Dict
 from pydantic import BaseModel
 from bson import ObjectId
