@@ -9,70 +9,67 @@ import json
 import time
 
 app = FastAPI(
-       title="Sistema de Monitoreo Estructural",
-       description="API para gestionar reportes de monitoreo estructural con autenticación de usuarios.",
-       version="1.0.0"
-   )
+    title="Sistema de Monitoreo Estructural",
+    description="API para gestionar reportes de monitoreo estructural con autenticación de usuarios.",
+    version="1.0.0"
+)
 
-   # Middleware para medir el tiempo de las solicitudes
+# Middleware para medir el tiempo de las solicitudes
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-       start_time = time.time()
-       response = await call_next(request)
-       process_time = time.time() - start_time
-       print(f"Tiempo de procesamiento para {request.url}: {process_time:.2f} segundos")
-       response.headers["X-Process-Time"] = str(process_time)
-       return response
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    print(f"Tiempo de procesamiento para {request.url}: {process_time:.2f} segundos")
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
 
-   # Inicializar Firebase Admin SDK solo si no está inicializado
+# Inicializar Firebase Admin SDK solo si no está inicializado
 firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
 if not firebase_admin._apps:
-       if firebase_credentials:
-           decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
-           cred = credentials.Certificate(json.loads(decoded_credentials))
-           firebase_admin.initialize_app(cred)
-       else:
-           cred = credentials.Certificate("serviceAccountKey.json")
-           firebase_admin.initialize_app(cred)
+    if firebase_credentials:
+        decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
+        cred = credentials.Certificate(json.loads(decoded_credentials))
+        firebase_admin.initialize_app(cred)
+    else:
+        cred = credentials.Certificate("serviceAccountKey.json")
+        firebase_admin.initialize_app(cred)
 
-   # Configurar CORS para permitir solicitudes desde el frontend
+# Configurar CORS para permitir solicitudes desde el frontend
 origins = [
-       "http://localhost:3000",
-       "https://eclectic-frangipane-39ee69.netlify.app",
-   ]
+    "http://localhost:3000",
+    "https://eclectic-frangipane-39ee69.netlify.app",
+]
 
 app.add_middleware(
-       CORSMiddleware,
-       allow_origins=origins,
-       allow_credentials=True,
-       allow_methods=["*"],
-       allow_headers=["*"],
-   )
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-   # Función para asegurar que el administrador exista en Firebase Authentication
+# Función para asegurar que el administrador exista en Firebase Authentication
 def ensure_admin_user():
-       try:
-           # Verificar si el usuario admin@example.com existe
-           user = firebase_auth.get_user_by_email("admin@example.com")
-           print("Usuario administrador ya existe:", user.email)
-       except firebase_auth.UserNotFoundError:
-           # Si no existe, crearlo con la contraseña admin123
-           print("Creando usuario administrador...")
-           firebase_auth.create_user(
-               email="admin@example.com",
-               password="admin123",
-               email_verified=True
-           )
-           print("Usuario administrador creado: admin@example.com")
-       except Exception as e:
-           print(f"Error al verificar/crear administrador: {str(e)}")
+    try:
+        user = firebase_auth.get_user_by_email("admin@example.com")
+        print("Usuario administrador ya existe:", user.email)
+    except firebase_auth.UserNotFoundError:
+        print("Creando usuario administrador...")
+        firebase_auth.create_user(
+            email="admin@example.com",
+            password="admin123",
+            email_verified=True
+        )
+        print("Usuario administrador creado: admin@example.com")
+    except Exception as e:
+        print(f"Error al verificar/crear administrador: {str(e)}")
 
-   # Ejecutar la función al iniciar la aplicación
 @app.on_event("startup")
 async def startup_event():
-       ensure_admin_user()
+    ensure_admin_user()
 
-   # Incluir las rutas de los diferentes módulos
+# Incluir las rutas de los diferentes módulos
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(reports.router, prefix="/api", tags=["Reportes"])
 app.include_router(admin.router, prefix="/api", tags=["Administración"])
