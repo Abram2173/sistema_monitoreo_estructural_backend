@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
 import firebase_admin
-from firebase_admin import credentials
+from firebase_admin import credentials, auth as firebase_auth
 import os
 import base64
 import json
@@ -38,7 +38,7 @@ if not firebase_admin._apps:
    # Configurar CORS para permitir solicitudes desde el frontend
 origins = [
        "http://localhost:3000",
-       "https://eclectic-frangipane-39ee69.netlify.app",  # URL de Netlify
+       "https://eclectic-frangipane-39ee69.netlify.app",
    ]
 
 app.add_middleware(
@@ -48,6 +48,29 @@ app.add_middleware(
        allow_methods=["*"],
        allow_headers=["*"],
    )
+
+   # Función para asegurar que el administrador exista en Firebase Authentication
+def ensure_admin_user():
+       try:
+           # Verificar si el usuario admin@example.com existe
+           user = firebase_auth.get_user_by_email("admin@example.com")
+           print("Usuario administrador ya existe:", user.email)
+       except firebase_auth.UserNotFoundError:
+           # Si no existe, crearlo con la contraseña admin123
+           print("Creando usuario administrador...")
+           firebase_auth.create_user(
+               email="admin@example.com",
+               password="admin123",
+               email_verified=True
+           )
+           print("Usuario administrador creado: admin@example.com")
+       except Exception as e:
+           print(f"Error al verificar/crear administrador: {str(e)}")
+
+   # Ejecutar la función al iniciar la aplicación
+@app.on_event("startup")
+async def startup_event():
+       ensure_admin_user()
 
    # Incluir las rutas de los diferentes módulos
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
