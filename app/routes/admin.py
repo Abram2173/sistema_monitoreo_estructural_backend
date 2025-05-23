@@ -88,10 +88,10 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             print(f"Error al crear usuario en Firebase: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error al crear el usuario en Firebase: {str(e)}")
 
-        # Configurar el custom claim automáticamente
+        # Configurar el custom claim automáticamente (SIN await, ya que no es asíncrono)
         print("Configurando custom claim...")
         try:
-            await firebase_auth.set_custom_user_claims(firebase_user.uid, {"role": user.role})
+            firebase_auth.set_custom_user_claims(firebase_user.uid, {"role": user.role})
             print(f"Custom claim configurado: role={user.role}")
         except Exception as e:
             print(f"Error al configurar custom claim: {str(e)}")
