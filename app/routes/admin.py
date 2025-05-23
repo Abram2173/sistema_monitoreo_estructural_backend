@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
+from typing import List, Dict
 from app.config.database import users_collection, reports_collection
 from app.dependencies.auth import get_current_admin_user
+from app.models.user import UserCreate
 from firebase_admin import auth as firebase_auth
-from typing import List, Dict
 from pydantic import BaseModel
 from bson import ObjectId
 
@@ -61,7 +62,7 @@ async def get_supervisors(current_user: dict = Depends(get_current_admin_user)):
 async def create_user(user: UserCreate, current_user: dict = Depends(get_current_admin_user)):
     """
     Crea un nuevo usuario (solo accesible para administradores).
-    Registra el usuario en MongoDB y Firebase.
+    Registra el usuario en MongoDB y Firebase, y configura el custom claim 'role'.
     """
     try:
         existing_user = await users_collection.find_one({
@@ -76,6 +77,8 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
                 password=user.password,
                 display_name=user.name
             )
+            # Configurar el custom claim automáticamente
+            await firebase_auth.set_custom_user_claims(firebase_user.uid, {"role": user.role})
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error al crear el usuario en Firebase: {str(e)}")
 
