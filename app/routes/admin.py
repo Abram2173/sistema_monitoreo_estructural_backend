@@ -64,24 +64,41 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
     Crea un nuevo usuario (solo accesible para administradores).
     Registra el usuario en MongoDB y Firebase, y configura el custom claim 'role'.
     """
+    print(f"Intentando crear usuario: {user.email}, username: {user.username}, role: {user.role}")
     try:
+        # Verificar si el usuario ya existe en la base de datos
+        print("Verificando si el usuario ya existe en MongoDB...")
         existing_user = await users_collection.find_one({
             "$or": [{"username": user.username}, {"email": user.email}]
         })
         if existing_user:
+            print(f"Usuario ya existe: {existing_user}")
             raise HTTPException(status_code=400, detail="El username o email ya está en uso")
 
+        # Crear el usuario en Firebase Authentication
+        print("Creando usuario en Firebase...")
         try:
             firebase_user = firebase_auth.create_user(
                 email=user.email,
                 password=user.password,
                 display_name=user.name
             )
-            # Configurar el custom claim automáticamente
-            await firebase_auth.set_custom_user_claims(firebase_user.uid, {"role": user.role})
+            print(f"Usuario creado en Firebase con UID: {firebase_user.uid}")
         except Exception as e:
+            print(f"Error al crear usuario en Firebase: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error al crear el usuario en Firebase: {str(e)}")
 
+        # Configurar el custom claim automáticamente
+        print("Configurando custom claim...")
+        try:
+            await firebase_auth.set_custom_user_claims(firebase_user.uid, {"role": user.role})
+            print(f"Custom claim configurado: role={user.role}")
+        except Exception as e:
+            print(f"Error al configurar custom claim: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error al configurar custom claim: {str(e)}")
+
+        # Guardar el usuario en MongoDB
+        print("Guardando usuario en MongoDB...")
         user_dict = {
             "username": user.username,
             "email": user.email,
@@ -89,6 +106,7 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             "name": user.name
         }
         await users_collection.insert_one(user_dict)
+        print("Usuario guardado en MongoDB exitosamente")
 
         return {
             "username": user.username,
@@ -97,15 +115,21 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             "name": user.name
         }
     except HTTPException as e:
+        print(f"HTTPException capturada: {str(e)}")
         try:
             firebase_auth.delete_user(firebase_user.uid)
+            print(f"Usuario eliminado de Firebase: {firebase_user.uid}")
         except:
+            print("No se pudo eliminar el usuario de Firebase")
             pass
         raise e
     except Exception as e:
+        print(f"Excepción general capturada: {str(e)}")
         try:
             firebase_auth.delete_user(firebase_user.uid)
+            print(f"Usuario eliminado de Firebase: {firebase_user.uid}")
         except:
+            print("No se pudo eliminar el usuario de Firebase")
             pass
         raise HTTPException(status_code=500, detail=f"Error al crear el usuario: {str(e)}")
 
