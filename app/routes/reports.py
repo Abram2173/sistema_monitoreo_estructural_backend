@@ -11,19 +11,17 @@ router = APIRouter()
 @router.post("/reports", response_model=ReportOut)
 async def create_report(report: ReportCreate, current_user: dict = Depends(get_current_inspector_or_supervisor_user)):
     try:
-        if current_user["role"] != "inspector":
-            raise HTTPException(status_code=403, detail="Only inspectors can create reports")
-        
-        inspector_id = current_user["username"]
-        print(f"Inspector ID: {inspector_id}")
+        inspector_email = current_user["username"]
+        print(f"Inspector Email: {inspector_email}")
 
-        user = await users_collection.find_one({"username": inspector_id})
+        user = await users_collection.find_one({"email": inspector_email})
         if not user:
-            print(f"Usuario no encontrado: {inspector_id}")
+            print(f"Usuario no encontrado: {inspector_email}")
             raise HTTPException(status_code=404, detail="Inspector no encontrado en la base de datos")
         
+        inspector_id = user["username"]
         inspector_name = user.get("name", inspector_id)
-        print(f"Inspector Name: {inspector_name}")
+        print(f"Inspector ID: {inspector_id}, Inspector Name: {inspector_name}")
 
         report_dict = report.dict()
         report_dict["inspector_id"] = inspector_id
@@ -50,16 +48,24 @@ async def create_report(report: ReportCreate, current_user: dict = Depends(get_c
 
 @router.get("/reports", response_model=List[ReportOut])
 async def get_reports(
-    current_user: dict = Depends(get_current_user_with_report_access)  # Nueva dependencia
+    current_user: dict = Depends(get_current_user_with_report_access)
 ):
     try:
         reports = []
         if current_user["role"] == "inspector":
-            cursor = reports_collection.find({"inspector_id": current_user["username"]})
+            user = await users_collection.find_one({"email": current_user["username"]})
+            if not user:
+                print(f"Usuario no encontrado: {current_user['username']}")
+                raise HTTPException(status_code=404, detail="Usuario no encontrado")
+            inspector_id = user["username"]
+            print(f"Obteniendo reportes para inspector: {inspector_id}")
+            cursor = reports_collection.find({"inspector_id": inspector_id})
         elif current_user["role"] == "supervisor":
+            print(f"Obteniendo reportes para supervisor: {current_user['username']}")
             cursor = reports_collection.find({"assigned_supervisor": current_user["username"]})
         else:  # Admin
-            cursor = reports_collection.find()  # Los administradores ven todos los reportes
+            print("Obteniendo todos los reportes (admin)")
+            cursor = reports_collection.find()
 
         async for report in cursor:
             report_dict = {
@@ -89,17 +95,20 @@ async def get_reports(
 async def update_report(
     report_id: str,
     update_data: ReportUpdate,
-    current_user: dict = Depends(get_current_inspector_or_supervisor_user)
+    current_user: dict = Depends(get_current_user_with_report_access)
 ):
     try:
         if current_user["role"] != "supervisor":
+            print(f"Error: {current_user['username']} no es supervisor (rol: {current_user['role']})")
             raise HTTPException(status_code=403, detail="Only supervisors can update reports")
 
         report = await reports_collection.find_one({"_id": ObjectId(report_id)})
         if not report:
+            print(f"Reporte no encontrado: {report_id}")
             raise HTTPException(status_code=404, detail="Report not found")
 
         if report.get("assigned_supervisor") != current_user["username"]:
+            print(f"Error: {current_user['username']} no está asignado al reporte {report_id}")
             raise HTTPException(status_code=403, detail="No estás asignado a este reporte")
 
         update_dict = update_data.dict(exclude_unset=True)
