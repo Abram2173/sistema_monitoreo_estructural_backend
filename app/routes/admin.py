@@ -9,7 +9,6 @@ from bson import ObjectId
 
 router = APIRouter()
 
-# Modelo para la creación de usuarios
 class UserCreate(BaseModel):
     username: str
     email: str
@@ -17,7 +16,6 @@ class UserCreate(BaseModel):
     name: str
     password: str
 
-# Modelo para asignar reportes
 class ReportAssign(BaseModel):
     report_id: str
     supervisor_username: str
@@ -180,14 +178,18 @@ async def assign_report(assignment: ReportAssign, current_user: dict = Depends(g
             print(f"El usuario {assignment.supervisor_username} no es un supervisor (rol: {supervisor['role']})")
             raise HTTPException(status_code=400, detail="El usuario no es un supervisor")
 
-        # Asignar el reporte al supervisor
+        # Usar el email del supervisor en lugar del username
+        supervisor_email = supervisor["email"]
+        print(f"Asignando reporte {assignment.report_id} al email del supervisor: {supervisor_email}")
+
+        # Asignar el reporte al supervisor usando el email
         await reports_collection.update_one(
             {"_id": ObjectId(assignment.report_id)},
-            {"$set": {"assigned_supervisor": assignment.supervisor_username}}
+            {"$set": {"assigned_supervisor": supervisor_email}}
         )
-        print(f"Reporte {assignment.report_id} asignado a {assignment.supervisor_username}")
+        print(f"Reporte {assignment.report_id} asignado a {supervisor_email}")
 
-        return {"message": f"Reporte {assignment.report_id} asignado a {assignment.supervisor_username}"}
+        return {"message": f"Reporte {assignment.report_id} asignado a {supervisor_email}"}
     except Exception as e:
         print(f"Error al asignar el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al asignar el reporte: {str(e)}")
