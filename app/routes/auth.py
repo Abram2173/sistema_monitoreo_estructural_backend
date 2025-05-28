@@ -11,9 +11,10 @@ cache = TTLCache(maxsize=100, ttl=300)
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
+        # Invalidar el caché para este token al iniciar una nueva sesión
         if token in cache:
-            print(f"Token encontrado en caché: {token}")
-            return cache[token]
+            print(f"Invalidando caché para el token: {token}")
+            del cache[token]
 
         decoded_token = auth.verify_id_token(token)
         email = decoded_token.get("email")
