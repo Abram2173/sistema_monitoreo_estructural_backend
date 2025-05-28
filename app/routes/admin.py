@@ -24,9 +24,6 @@ class ReportAssign(BaseModel):
 
 @router.get("/admin/users", response_model=List[Dict])
 async def get_all_users(current_user: dict = Depends(get_current_admin_user)):
-    """
-    Obtiene una lista de todos los usuarios (solo accesible para administradores).
-    """
     try:
         users = []
         async for user in users_collection.find():
@@ -46,9 +43,6 @@ async def get_all_users(current_user: dict = Depends(get_current_admin_user)):
 
 @router.get("/admin/supervisors", response_model=List[Dict])
 async def get_supervisors(current_user: dict = Depends(get_current_admin_user)):
-    """
-    Obtiene una lista de todos los supervisores (solo accesible para administradores).
-    """
     try:
         supervisors = []
         async for user in users_collection.find({"role": "supervisor"}):
@@ -66,13 +60,8 @@ async def get_supervisors(current_user: dict = Depends(get_current_admin_user)):
 
 @router.post("/admin/users", response_model=Dict)
 async def create_user(user: UserCreate, current_user: dict = Depends(get_current_admin_user)):
-    """
-    Crea un nuevo usuario (solo accesible para administradores).
-    Registra el usuario en MongoDB y Firebase, y configura el custom claim 'role'.
-    """
     print(f"Intentando crear usuario: {user.email}, username: {user.username}, role: {user.role}")
     try:
-        # Verificar si el usuario ya existe en la base de datos
         print("Verificando si el usuario ya existe en MongoDB...")
         existing_user = await users_collection.find_one({
             "$or": [{"username": user.username}, {"email": user.email}]
@@ -81,7 +70,6 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             print(f"Usuario ya existe: {existing_user}")
             raise HTTPException(status_code=400, detail="El username o email ya está en uso")
 
-        # Crear el usuario en Firebase Authentication
         print("Creando usuario en Firebase...")
         try:
             firebase_user = firebase_auth.create_user(
@@ -94,7 +82,6 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             print(f"Error al crear usuario en Firebase: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error al crear el usuario en Firebase: {str(e)}")
 
-        # Configurar el custom claim automáticamente
         print("Configurando custom claim...")
         try:
             firebase_auth.set_custom_user_claims(firebase_user.uid, {"role": user.role})
@@ -103,7 +90,6 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             print(f"Error al configurar custom claim: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error al configurar custom claim: {str(e)}")
 
-        # Guardar el usuario en MongoDB
         print("Guardando usuario en MongoDB...")
         user_dict = {
             "username": user.username,
@@ -142,12 +128,7 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
 
 @router.delete("/admin/users/{username}")
 async def delete_user(username: str, current_user: dict = Depends(get_current_admin_user)):
-    """
-    Elimina un usuario por su username (solo accesible para administradores).
-    No permite eliminar al propio usuario administrador.
-    """
     try:
-        # Buscar al usuario administrador por email, ya que current_user["username"] es el email
         admin_user = await users_collection.find_one({"email": current_user["username"]})
         if not admin_user:
             raise HTTPException(status_code=404, detail="Administrador no encontrado en la base de datos")
@@ -156,12 +137,10 @@ async def delete_user(username: str, current_user: dict = Depends(get_current_ad
         if username == admin_username:
             raise HTTPException(status_code=403, detail="No puedes eliminarte a ti mismo")
 
-        # Buscar al usuario a eliminar por username
         user = await users_collection.find_one({"username": username})
         if not user:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-        # Eliminar el usuario de Firebase
         try:
             firebase_user = firebase_auth.get_user_by_email(user["email"])
             firebase_auth.delete_user(firebase_user.uid)
@@ -170,12 +149,10 @@ async def delete_user(username: str, current_user: dict = Depends(get_current_ad
             print(f"Error al eliminar el usuario de Firebase: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error al eliminar el usuario de Firebase: {str(e)}")
 
-        # Eliminar reportes asociados si el usuario es inspector
         if user["role"] == "inspector":
             await reports_collection.delete_many({"inspector_id": username})
             print(f"Reportes asociados al inspector {username} eliminados")
 
-        # Eliminar el usuario de MongoDB
         await users_collection.delete_one({"username": username})
         print(f"Usuario {username} eliminado de MongoDB")
 
@@ -186,20 +163,21 @@ async def delete_user(username: str, current_user: dict = Depends(get_current_ad
 
 @router.post("/admin/assign-report")
 async def assign_report(assignment: ReportAssign, current_user: dict = Depends(get_current_admin_user)):
-    """
-    Asigna un reporte a un supervisor (solo accesible para administradores).
-    """
     try:
+        print(f"Intentando asignar reporte {assignment.report_id} al supervisor {assignment.supervisor_username}")
         # Verificar si el reporte existe
         report = await reports_collection.find_one({"_id": ObjectId(assignment.report_id)})
         if not report:
+            print(f"Reporte no encontrado: {assignment.report_id}")
             raise HTTPException(status_code=404, detail="Reporte no encontrado")
 
         # Verificar si el supervisor existe y tiene el rol correcto
         supervisor = await users_collection.find_one({"username": assignment.supervisor_username})
         if not supervisor:
+            print(f"Supervisor no encontrado: {assignment.supervisor_username}")
             raise HTTPException(status_code=404, detail="Supervisor no encontrado")
         if supervisor["role"] != "supervisor":
+            print(f"El usuario {assignment.supervisor_username} no es un supervisor (rol: {supervisor['role']})")
             raise HTTPException(status_code=400, detail="El usuario no es un supervisor")
 
         # Asignar el reporte al supervisor

@@ -24,7 +24,7 @@ async def create_report(report: ReportCreate, current_user: dict = Depends(get_c
         print(f"Inspector ID: {inspector_id}, Inspector Name: {inspector_name}")
 
         report_dict = report.dict()
-        print(f"Cuerpo de la solicitud recibido: {report_dict}")  # Añadimos depuración
+        print(f"Cuerpo de la solicitud recibido: {report_dict}")
         report_dict["inspector_id"] = inspector_id
         report_dict["inspector_name"] = inspector_name
         report_dict["status"] = "Pendiente"
