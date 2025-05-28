@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 from typing import Dict, Optional
-from datetime import datetime
 
 class ReportCreate(BaseModel):
     location: str

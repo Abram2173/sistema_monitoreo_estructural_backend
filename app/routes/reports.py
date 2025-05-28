@@ -113,6 +113,11 @@ async def update_report(
             raise HTTPException(status_code=403, detail="No estás asignado a este reporte")
 
         update_dict = update_data.dict(exclude_unset=True)
+        # Validar el estado
+        if "status" in update_dict and update_dict["status"] not in ["Aprobado", "Rechazado"]:
+            raise HTTPException(status_code=400, detail="El estado debe ser 'Aprobado' o 'Rechazado'")
+        print(f"Actualizando reporte {report_id} con datos: {update_dict}")
+
         await reports_collection.update_one(
             {"_id": ObjectId(report_id)},
             {"$set": update_dict}
