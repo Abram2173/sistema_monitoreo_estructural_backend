@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.config.database import reports_collection, users_collection
 from app.schemas.report import ReportCreate, ReportUpdate, ReportOut
-from app.dependencies.auth import get_current_inspector_or_supervisor_user, get_current_user_with_report_access
+from app.dependencies.auth import get_current_inspector_or_supervisor_user, get_current_user_with_report_access, get_current_admin_user
 from datetime import datetime
 from typing import List, Dict
 from bson import ObjectId
@@ -113,7 +113,6 @@ async def update_report(
             raise HTTPException(status_code=403, detail="No estás asignado a este reporte")
 
         update_dict = update_data.dict(exclude_unset=True)
-        # Validar el estado
         if "status" in update_dict and update_dict["status"] not in ["Aprobado", "Rechazado"]:
             raise HTTPException(status_code=400, detail="El estado debe ser 'Aprobado' o 'Rechazado'")
         print(f"Actualizando reporte {report_id} con datos: {update_dict}")
@@ -144,3 +143,19 @@ async def update_report(
     except Exception as e:
         print(f"Error al actualizar el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al actualizar el reporte: {str(e)}")
+
+@router.delete("/reports/{report_id}")
+async def delete_report(report_id: str, current_user: dict = Depends(get_current_admin_user)):
+    try:
+        report = await reports_collection.find_one({"_id": ObjectId(report_id)})
+        if not report:
+            print(f"Reporte no encontrado: {report_id}")
+            raise HTTPException(status_code=404, detail="Reporte no encontrado")
+
+        await reports_collection.delete_one({"_id": ObjectId(report_id)})
+        print(f"Reporte {report_id} eliminado de MongoDB")
+
+        return {"message": f"Reporte {report_id} eliminado exitosamente"}
+    except Exception as e:
+        print(f"Error al eliminar el reporte: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al eliminar el reporte: {str(e)}")
