@@ -231,10 +231,10 @@ async def get_report_image(report_id: str, download: bool = False):
         # Configurar headers
         headers = {}
         if download:
-            # Determinar la extensión basada en content_type
             extension = "jpg" if "jpeg" in content_type.lower() else content_type.split("/")[-1]
             filename = f"reporte_{report_id}.{extension}"
             headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+            headers["Content-Length"] = str(len(image_data))  # Añadir longitud del contenido
 
         return StreamingResponse(io.BytesIO(image_data), media_type=content_type, headers=headers)
     except Exception as e:
