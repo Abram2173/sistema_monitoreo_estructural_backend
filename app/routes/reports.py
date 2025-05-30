@@ -18,7 +18,8 @@ async def create_report(
     measurements: str = File(...),
     risk_level: str = File(...),
     comments: Optional[str] = File(None),
-    image: Optional[UploadFile] = File(None),
+    image1: Optional[UploadFile] = File(None),  # Primera imagen
+    image2: Optional[UploadFile] = File(None),  # Segunda imagen
     current_user: dict = Depends(get_current_inspector_or_supervisor_user)
 ):
     try:
@@ -48,19 +49,33 @@ async def create_report(
             print(f"Error al parsear measurements: {str(e)}")
             raise HTTPException(status_code=400, detail="Formato de measurements inválido")
 
-        # Procesar la imagen
-        image_data = None
-        content_type = None
-        if image:
-            file_extension = image.filename.split(".")[-1].lower()
+        # Procesar la imagen 1
+        image_data_1 = None
+        content_type_1 = None
+        if image1:
+            file_extension = image1.filename.split(".")[-1].lower()
             if file_extension not in ["jpg", "jpeg", "png"]:
-                raise HTTPException(status_code=400, detail="Solo se permiten imágenes JPG o PNG")
-            if image.size > 5 * 1024 * 1024:  # Límite de 5MB
-                raise HTTPException(status_code=400, detail="La imagen no puede superar 5MB")
+                raise HTTPException(status_code=400, detail="Solo se permiten imágenes JPG o PNG para image1")
+            if image1.size > 5 * 1024 * 1024:  # Límite de 5MB
+                raise HTTPException(status_code=400, detail="La imagen 1 no puede superar 5MB")
             
-            image_data = await image.read()
-            content_type = image.content_type
-            print(f"Imagen procesada: {len(image_data)} bytes, tipo: {content_type}")
+            image_data_1 = await image1.read()
+            content_type_1 = image1.content_type
+            print(f"Imagen 1 procesada: {len(image_data_1)} bytes, tipo: {content_type_1}")
+
+        # Procesar la imagen 2
+        image_data_2 = None
+        content_type_2 = None
+        if image2:
+            file_extension = image2.filename.split(".")[-1].lower()
+            if file_extension not in ["jpg", "jpeg", "png"]:
+                raise HTTPException(status_code=400, detail="Solo se permiten imágenes JPG o PNG para image2")
+            if image2.size > 5 * 1024 * 1024:  # Límite de 5MB
+                raise HTTPException(status_code=400, detail="La imagen 2 no puede superar 5MB")
+            
+            image_data_2 = await image2.read()
+            content_type_2 = image2.content_type
+            print(f"Imagen 2 procesada: {len(image_data_2)} bytes, tipo: {content_type_2}")
 
         # Crear el diccionario del reporte
         report_dict = {
@@ -74,8 +89,10 @@ async def create_report(
             "status": "Pendiente",
             "created_at": datetime.utcnow().isoformat(),
             "assigned_supervisor": None,
-            "image_data": image_data,  # Datos binarios de la imagen
-            "content_type": content_type  # Tipo de contenido (ej. image/jpeg)
+            "image_data_1": image_data_1,  # Datos binarios de la imagen 1
+            "content_type_1": content_type_1,
+            "image_data_2": image_data_2,  # Datos binarios de la imagen 2
+            "content_type_2": content_type_2
         }
         print(f"Reporte a insertar: {report_dict}")
 
@@ -84,8 +101,10 @@ async def create_report(
         response_dict = report_dict.copy()
         response_dict["id"] = str(result.inserted_id)
         response_dict["recommendations"] = None
-        response_dict.pop("image_data", None)  # No devolver datos binarios en la respuesta
-        response_dict.pop("content_type", None)
+        response_dict.pop("image_data_1", None)
+        response_dict.pop("content_type_1", None)
+        response_dict.pop("image_data_2", None)
+        response_dict.pop("content_type_2", None)
 
         print(f"Reporte insertado con ID: {response_dict['id']}")
         print(f"Datos de respuesta: {response_dict}")
@@ -133,7 +152,8 @@ async def get_reports(
                 "created_at": str(report.get("created_at", "")),
                 "recommendations": report.get("recommendations"),
                 "assigned_supervisor": report.get("assigned_supervisor"),
-                "image_path": f"/api/reports/{str(report['_id'])}/image" if report.get("image_data") else None
+                "image_path_1": f"/api/reports/{str(report['_id'])}/image1" if report.get("image_data_1") else None,
+                "image_path_2": f"/api/reports/{str(report['_id'])}/image2" if report.get("image_data_2") else None
             }
             print(f"Reporte procesado: {report_dict}")
             reports.append(ReportOut(**report_dict))
@@ -144,23 +164,55 @@ async def get_reports(
         print(f"Error al obtener los reportes: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al obtener los reportes: {str(e)}")
 
-@router.get("/reports/{report_id}/image")
-async def get_report_image(report_id: str):
+@router.get("/reports/{report_id}/image1")
+async def get_report_image1(report_id: str, download: bool = False):
     try:
         report = await reports_collection.find_one({"_id": ObjectId(report_id)})
         if not report:
             raise HTTPException(status_code=404, detail="Reporte no encontrado")
         
-        image_data = report.get("image_data")
-        content_type = report.get("content_type", "image/jpeg")
+        image_data = report.get("image_data_1")
+        content_type = report.get("content_type_1", "image/jpeg")
 
         if not image_data:
-            raise HTTPException(status_code=404, detail="El reporte no tiene una imagen")
+            raise HTTPException(status_code=404, detail="El reporte no tiene una imagen 1")
 
-        return StreamingResponse(io.BytesIO(image_data), media_type=content_type)
+        headers = {}
+        if download:
+            extension = "jpg" if "jpeg" in content_type.lower() else content_type.split("/")[-1]
+            filename = f"reporte_{report_id}_image1.{extension}"
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+            headers["Content-Length"] = str(len(image_data))
+
+        return StreamingResponse(io.BytesIO(image_data), media_type=content_type, headers=headers)
     except Exception as e:
-        print(f"Error al obtener la imagen: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al obtener la imagen: {str(e)}")
+        print(f"Error al obtener la imagen 1: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener la imagen 1: {str(e)}")
+
+@router.get("/reports/{report_id}/image2")
+async def get_report_image2(report_id: str, download: bool = False):
+    try:
+        report = await reports_collection.find_one({"_id": ObjectId(report_id)})
+        if not report:
+            raise HTTPException(status_code=404, detail="Reporte no encontrado")
+        
+        image_data = report.get("image_data_2")
+        content_type = report.get("content_type_2", "image/jpeg")
+
+        if not image_data:
+            raise HTTPException(status_code=404, detail="El reporte no tiene una imagen 2")
+
+        headers = {}
+        if download:
+            extension = "jpg" if "jpeg" in content_type.lower() else content_type.split("/")[-1]
+            filename = f"reporte_{report_id}_image2.{extension}"
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+            headers["Content-Length"] = str(len(image_data))
+
+        return StreamingResponse(io.BytesIO(image_data), media_type=content_type, headers=headers)
+    except Exception as e:
+        print(f"Error al obtener la imagen 2: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener la imagen 2: {str(e)}")
 
 @router.put("/reports/{report_id}", response_model=ReportOut)
 async def update_report(
@@ -206,7 +258,8 @@ async def update_report(
             "created_at": str(updated_report.get("created_at", "")),
             "recommendations": updated_report.get("recommendations"),
             "assigned_supervisor": updated_report.get("assigned_supervisor"),
-            "image_path": f"/api/reports/{str(updated_report['_id'])}/image" if updated_report.get("image_data") else None
+            "image_path_1": f"/api/reports/{str(updated_report['_id'])}/image1" if updated_report.get("image_data_1") else None,
+            "image_path_2": f"/api/reports/{str(updated_report['_id'])}/image2" if updated_report.get("image_data_2") else None
         }
 
         print(f"Reporte actualizado: {report_dict}")
@@ -215,28 +268,18 @@ async def update_report(
         print(f"Error al actualizar el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al actualizar el reporte: {str(e)}")
 
-@router.get("/reports/{report_id}/image")
-async def get_report_image(report_id: str, download: bool = False):
+@router.delete("/reports/{report_id}")
+async def delete_report(report_id: str, current_user: dict = Depends(get_current_admin_user)):
     try:
         report = await reports_collection.find_one({"_id": ObjectId(report_id)})
         if not report:
+            print(f"Reporte no encontrado: {report_id}")
             raise HTTPException(status_code=404, detail="Reporte no encontrado")
-        
-        image_data = report.get("image_data")
-        content_type = report.get("content_type", "image/jpeg")
 
-        if not image_data:
-            raise HTTPException(status_code=404, detail="El reporte no tiene una imagen")
+        await reports_collection.delete_one({"_id": ObjectId(report_id)})
+        print(f"Reporte {report_id} eliminado de MongoDB")
 
-        # Configurar headers
-        headers = {}
-        if download:
-            extension = "jpg" if "jpeg" in content_type.lower() else content_type.split("/")[-1]
-            filename = f"reporte_{report_id}.{extension}"
-            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-            headers["Content-Length"] = str(len(image_data))  # Añadir longitud del contenido
-
-        return StreamingResponse(io.BytesIO(image_data), media_type=content_type, headers=headers)
+        return {"message": f"Reporte {report_id} eliminado exitosamente"}
     except Exception as e:
-        print(f"Error al obtener la imagen: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al obtener la imagen: {str(e)}")  
+        print(f"Error al eliminar el reporte: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al eliminar el reporte: {str(e)}")
