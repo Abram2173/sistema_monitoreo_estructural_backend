@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 from app.config.database import reports_collection, users_collection
 from app.schemas.report import ReportCreate, ReportUpdate, ReportOut
 from app.dependencies.auth import get_current_inspector_or_supervisor_user, get_current_user_with_report_access, get_current_admin_user
@@ -7,14 +7,9 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from bson import ObjectId
 import json
-import os
-from pathlib import Path
+import io
 
 router = APIRouter()
-
-# Configuración para guardar imágenes
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 @router.post("/reports", response_model=ReportOut)
 async def create_report(
@@ -53,21 +48,19 @@ async def create_report(
             print(f"Error al parsear measurements: {str(e)}")
             raise HTTPException(status_code=400, detail="Formato de measurements inválido")
 
-        # Guardar la imagen si existe
-        image_path = None
+        # Procesar la imagen
+        image_data = None
+        content_type = None
         if image:
             file_extension = image.filename.split(".")[-1].lower()
             if file_extension not in ["jpg", "jpeg", "png"]:
                 raise HTTPException(status_code=400, detail="Solo se permiten imágenes JPG o PNG")
+            if image.size > 5 * 1024 * 1024:  # Límite de 5MB
+                raise HTTPException(status_code=400, detail="La imagen no puede superar 5MB")
             
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            filename = f"report_{inspector_id}_{timestamp}.{file_extension}"
-            image_path = os.path.join(UPLOAD_FOLDER, filename)
-            
-            with open(image_path, "wb") as f:
-                content = await image.read()
-                f.write(content)
-            print(f"Imagen guardada en: {image_path}")
+            image_data = await image.read()
+            content_type = image.content_type
+            print(f"Imagen procesada: {len(image_data)} bytes, tipo: {content_type}")
 
         # Crear el diccionario del reporte
         report_dict = {
@@ -81,7 +74,8 @@ async def create_report(
             "status": "Pendiente",
             "created_at": datetime.utcnow().isoformat(),
             "assigned_supervisor": None,
-            "image_path": image_path
+            "image_data": image_data,  # Datos binarios de la imagen
+            "content_type": content_type  # Tipo de contenido (ej. image/jpeg)
         }
         print(f"Reporte a insertar: {report_dict}")
 
@@ -90,6 +84,8 @@ async def create_report(
         response_dict = report_dict.copy()
         response_dict["id"] = str(result.inserted_id)
         response_dict["recommendations"] = None
+        response_dict.pop("image_data", None)  # No devolver datos binarios en la respuesta
+        response_dict.pop("content_type", None)
 
         print(f"Reporte insertado con ID: {response_dict['id']}")
         print(f"Datos de respuesta: {response_dict}")
@@ -137,7 +133,7 @@ async def get_reports(
                 "created_at": str(report.get("created_at", "")),
                 "recommendations": report.get("recommendations"),
                 "assigned_supervisor": report.get("assigned_supervisor"),
-                "image_path": report.get("image_path")
+                "image_path": f"/api/reports/{str(report['_id'])}/image" if report.get("image_data") else None
             }
             print(f"Reporte procesado: {report_dict}")
             reports.append(ReportOut(**report_dict))
@@ -147,6 +143,24 @@ async def get_reports(
     except Exception as e:
         print(f"Error al obtener los reportes: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al obtener los reportes: {str(e)}")
+
+@router.get("/reports/{report_id}/image")
+async def get_report_image(report_id: str):
+    try:
+        report = await reports_collection.find_one({"_id": ObjectId(report_id)})
+        if not report:
+            raise HTTPException(status_code=404, detail="Reporte no encontrado")
+        
+        image_data = report.get("image_data")
+        content_type = report.get("content_type", "image/jpeg")
+
+        if not image_data:
+            raise HTTPException(status_code=404, detail="El reporte no tiene una imagen")
+
+        return StreamingResponse(io.BytesIO(image_data), media_type=content_type)
+    except Exception as e:
+        print(f"Error al obtener la imagen: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener la imagen: {str(e)}")
 
 @router.put("/reports/{report_id}", response_model=ReportOut)
 async def update_report(
@@ -192,7 +206,7 @@ async def update_report(
             "created_at": str(updated_report.get("created_at", "")),
             "recommendations": updated_report.get("recommendations"),
             "assigned_supervisor": updated_report.get("assigned_supervisor"),
-            "image_path": updated_report.get("image_path")
+            "image_path": f"/api/reports/{str(updated_report['_id'])}/image" if updated_report.get("image_data") else None
         }
 
         print(f"Reporte actualizado: {report_dict}")
@@ -208,14 +222,6 @@ async def delete_report(report_id: str, current_user: dict = Depends(get_current
         if not report:
             print(f"Reporte no encontrado: {report_id}")
             raise HTTPException(status_code=404, detail="Reporte no encontrado")
-
-        # Eliminar la imagen asociada si existe
-        if report.get("image_path"):
-            try:
-                os.remove(report["image_path"])
-                print(f"Imagen eliminada: {report['image_path']}")
-            except FileNotFoundError:
-                print(f"Imagen no encontrada para eliminar: {report['image_path']}")
 
         await reports_collection.delete_one({"_id": ObjectId(report_id)})
         print(f"Reporte {report_id} eliminado de MongoDB")
