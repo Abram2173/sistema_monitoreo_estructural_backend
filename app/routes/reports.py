@@ -239,4 +239,4 @@ async def get_report_image(report_id: str, download: bool = False):
         return StreamingResponse(io.BytesIO(image_data), media_type=content_type, headers=headers)
     except Exception as e:
         print(f"Error al obtener la imagen: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al obtener la imagen: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener la imagen: {str(e)}")  
