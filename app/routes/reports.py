@@ -215,18 +215,28 @@ async def update_report(
         print(f"Error al actualizar el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al actualizar el reporte: {str(e)}")
 
-@router.delete("/reports/{report_id}")
-async def delete_report(report_id: str, current_user: dict = Depends(get_current_admin_user)):
+@router.get("/reports/{report_id}/image")
+async def get_report_image(report_id: str, download: bool = False):
     try:
         report = await reports_collection.find_one({"_id": ObjectId(report_id)})
         if not report:
-            print(f"Reporte no encontrado: {report_id}")
             raise HTTPException(status_code=404, detail="Reporte no encontrado")
+        
+        image_data = report.get("image_data")
+        content_type = report.get("content_type", "image/jpeg")
 
-        await reports_collection.delete_one({"_id": ObjectId(report_id)})
-        print(f"Reporte {report_id} eliminado de MongoDB")
+        if not image_data:
+            raise HTTPException(status_code=404, detail="El reporte no tiene una imagen")
 
-        return {"message": f"Reporte {report_id} eliminado exitosamente"}
+        # Configurar headers
+        headers = {}
+        if download:
+            # Determinar la extensión basada en content_type
+            extension = "jpg" if "jpeg" in content_type.lower() else content_type.split("/")[-1]
+            filename = f"reporte_{report_id}.{extension}"
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+        return StreamingResponse(io.BytesIO(image_data), media_type=content_type, headers=headers)
     except Exception as e:
-        print(f"Error al eliminar el reporte: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al eliminar el reporte: {str(e)}")
+        print(f"Error al obtener la imagen: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener la imagen: {str(e)}")
