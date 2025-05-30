@@ -26,3 +26,4 @@ class ReportOut(BaseModel):
     created_at: str
     recommendations: Optional[str] = None
     assigned_supervisor: Optional[str] = None  # Nuevo campo para asignar supervisor
+    image_path: Optional[str] = None  # Nuevo campo para la ruta de la imagen

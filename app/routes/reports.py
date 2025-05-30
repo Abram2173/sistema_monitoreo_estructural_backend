@@ -1,15 +1,31 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
+from fastapi.responses import JSONResponse
 from app.config.database import reports_collection, users_collection
 from app.schemas.report import ReportCreate, ReportUpdate, ReportOut
 from app.dependencies.auth import get_current_inspector_or_supervisor_user, get_current_user_with_report_access, get_current_admin_user
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 from bson import ObjectId
+import json
+import os
+from pathlib import Path
 
 router = APIRouter()
 
+# Configuración para guardar imágenes
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 @router.post("/reports", response_model=ReportOut)
-async def create_report(report: ReportCreate, current_user: dict = Depends(get_current_inspector_or_supervisor_user)):
+async def create_report(
+    location: str = File(...),
+    description: str = File(...),
+    measurements: str = File(...),
+    risk_level: str = File(...),
+    comments: Optional[str] = File(None),
+    image: Optional[UploadFile] = File(None),
+    current_user: dict = Depends(get_current_inspector_or_supervisor_user)
+):
     try:
         inspector_email = current_user["username"]
         print(f"Inspector Email: {inspector_email}")
@@ -23,14 +39,50 @@ async def create_report(report: ReportCreate, current_user: dict = Depends(get_c
         inspector_name = user.get("name", inspector_id)
         print(f"Inspector ID: {inspector_id}, Inspector Name: {inspector_name}")
 
-        report_dict = report.dict()
-        print(f"Cuerpo de la solicitud recibido: {report_dict}")
-        report_dict["inspector_id"] = inspector_id
-        report_dict["inspector_name"] = inspector_name
-        report_dict["status"] = "Pendiente"
-        report_dict["created_at"] = datetime.utcnow().isoformat()
-        report_dict["assigned_supervisor"] = None
+        # Validar risk_level
+        valid_risk_levels = ["bajo", "medio", "alto"]
+        if risk_level.lower() not in valid_risk_levels:
+            raise HTTPException(status_code=400, detail=f"risk_level debe ser uno de {valid_risk_levels}")
 
+        # Parsear measurements
+        try:
+            measurements_dict = json.loads(measurements)
+            if not isinstance(measurements_dict, dict):
+                raise ValueError("measurements debe ser un objeto JSON")
+        except json.JSONDecodeError as e:
+            print(f"Error al parsear measurements: {str(e)}")
+            raise HTTPException(status_code=400, detail="Formato de measurements inválido")
+
+        # Guardar la imagen si existe
+        image_path = None
+        if image:
+            file_extension = image.filename.split(".")[-1].lower()
+            if file_extension not in ["jpg", "jpeg", "png"]:
+                raise HTTPException(status_code=400, detail="Solo se permiten imágenes JPG o PNG")
+            
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"report_{inspector_id}_{timestamp}.{file_extension}"
+            image_path = os.path.join(UPLOAD_FOLDER, filename)
+            
+            with open(image_path, "wb") as f:
+                content = await image.read()
+                f.write(content)
+            print(f"Imagen guardada en: {image_path}")
+
+        # Crear el diccionario del reporte
+        report_dict = {
+            "location": location,
+            "description": description,
+            "measurements": measurements_dict,
+            "risk_level": risk_level.lower(),
+            "comments": comments,
+            "inspector_id": inspector_id,
+            "inspector_name": inspector_name,
+            "status": "Pendiente",
+            "created_at": datetime.utcnow().isoformat(),
+            "assigned_supervisor": None,
+            "image_path": image_path
+        }
         print(f"Reporte a insertar: {report_dict}")
 
         result = await reports_collection.insert_one(report_dict)
@@ -43,6 +95,9 @@ async def create_report(report: ReportCreate, current_user: dict = Depends(get_c
         print(f"Datos de respuesta: {response_dict}")
 
         return ReportOut(**response_dict)
+    except HTTPException as e:
+        print(f"Error HTTP: {str(e)}")
+        raise e
     except Exception as e:
         print(f"Error al crear el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
@@ -81,7 +136,8 @@ async def get_reports(
                 "status": str(report.get("status", "Pendiente")),
                 "created_at": str(report.get("created_at", "")),
                 "recommendations": report.get("recommendations"),
-                "assigned_supervisor": report.get("assigned_supervisor")
+                "assigned_supervisor": report.get("assigned_supervisor"),
+                "image_path": report.get("image_path")
             }
             print(f"Reporte procesado: {report_dict}")
             reports.append(ReportOut(**report_dict))
@@ -135,7 +191,8 @@ async def update_report(
             "status": str(updated_report.get("status", "Pendiente")),
             "created_at": str(updated_report.get("created_at", "")),
             "recommendations": updated_report.get("recommendations"),
-            "assigned_supervisor": updated_report.get("assigned_supervisor")
+            "assigned_supervisor": updated_report.get("assigned_supervisor"),
+            "image_path": updated_report.get("image_path")
         }
 
         print(f"Reporte actualizado: {report_dict}")
@@ -151,6 +208,14 @@ async def delete_report(report_id: str, current_user: dict = Depends(get_current
         if not report:
             print(f"Reporte no encontrado: {report_id}")
             raise HTTPException(status_code=404, detail="Reporte no encontrado")
+
+        # Eliminar la imagen asociada si existe
+        if report.get("image_path"):
+            try:
+                os.remove(report["image_path"])
+                print(f"Imagen eliminada: {report['image_path']}")
+            except FileNotFoundError:
+                print(f"Imagen no encontrada para eliminar: {report['image_path']}")
 
         await reports_collection.delete_one({"_id": ObjectId(report_id)})
         print(f"Reporte {report_id} eliminado de MongoDB")
