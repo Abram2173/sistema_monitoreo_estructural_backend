@@ -308,7 +308,7 @@ async def delete_report(report_id: str, current_user: dict = Depends(get_current
         await reports_collection.delete_one({"_id": ObjectId(report_id)})
         print(f"Reporte {report_id} eliminado de MongoDB")
 
-        return {"message": f"Reporte {report_id} eliminado exitosamente"}
+        return {"message": f"Reporte {report_id} eliminado exitosamente"}   
     except Exception as e:
         print(f"Error al eliminar el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al eliminar el reporte: {str(e)}")
