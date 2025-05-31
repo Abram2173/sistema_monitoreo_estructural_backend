@@ -8,29 +8,8 @@ from typing import List, Dict, Optional
 from bson import ObjectId
 import json
 import io
-from PIL import Image
 
 router = APIRouter()
-
-# Función para comprimir imágenes
-async def compress_image(image_data: bytes, max_size_kb: int = 500, quality_step: int = 10) -> bytes:
-    """Comprime una imagen hasta que sea menor o igual a max_size_kb (en kilobytes)."""
-    img = Image.open(io.BytesIO(image_data))
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    
-    output = io.BytesIO()
-    quality = 100
-    while quality > 0:
-        output.seek(0)
-        output.truncate(0)
-        img.save(output, format="JPEG", quality=quality, optimize=True)
-        compressed_data = output.getvalue()
-        size_kb = len(compressed_data) / 1024  # Tamaño en KB
-        if size_kb <= max_size_kb or quality <= 10:
-            return compressed_data
-        quality -= quality_step
-    return compressed_data
 
 @router.post("/reports", response_model=ReportOut)
 async def create_report(
@@ -77,15 +56,11 @@ async def create_report(
             file_extension = image1.filename.split(".")[-1].lower()
             if file_extension not in ["jpg", "jpeg", "png"]:
                 raise HTTPException(status_code=400, detail="Solo se permiten imágenes JPG o PNG para image1")
+            if image1.size > 5 * 1024 * 1024:  # Límite de 5MB
+                raise HTTPException(status_code=400, detail="La imagen 1 no puede superar 5MB")
             
             image_data_1 = await image1.read()
-            size_kb = len(image_data_1) / 1024  # Tamaño en KB
-            if size_kb > 2048:  # Límite de 2MB antes de compresión
-                raise HTTPException(status_code=400, detail="La imagen 1 no puede superar 2MB antes de compresión")
-
-            # Comprimir la imagen
-            image_data_1 = await compress_image(image_data_1, max_size_kb=500)
-            content_type_1 = "image/jpeg"  # Después de la compresión, siempre será JPEG
+            content_type_1 = image1.content_type
             print(f"Imagen 1 procesada: {len(image_data_1)} bytes, tipo: {content_type_1}")
 
         # Procesar la imagen 2
@@ -95,15 +70,11 @@ async def create_report(
             file_extension = image2.filename.split(".")[-1].lower()
             if file_extension not in ["jpg", "jpeg", "png"]:
                 raise HTTPException(status_code=400, detail="Solo se permiten imágenes JPG o PNG para image2")
+            if image2.size > 5 * 1024 * 1024:  # Límite de 5MB
+                raise HTTPException(status_code=400, detail="La imagen 2 no puede superar 5MB")
             
             image_data_2 = await image2.read()
-            size_kb = len(image_data_2) / 1024  # Tamaño en KB
-            if size_kb > 2048:  # Límite de 2MB antes de compresión
-                raise HTTPException(status_code=400, detail="La imagen 2 no puede superar 2MB antes de compresión")
-
-            # Comprimir la imagen
-            image_data_2 = await compress_image(image_data_2, max_size_kb=500)
-            content_type_2 = "image/jpeg"  # Después de la compresión, siempre será JPEG
+            content_type_2 = image2.content_type
             print(f"Imagen 2 procesada: {len(image_data_2)} bytes, tipo: {content_type_2}")
 
         # Crear el diccionario del reporte
@@ -308,7 +279,10 @@ async def delete_report(report_id: str, current_user: dict = Depends(get_current
         await reports_collection.delete_one({"_id": ObjectId(report_id)})
         print(f"Reporte {report_id} eliminado de MongoDB")
 
-        return {"message": f"Reporte {report_id} eliminado exitosamente"}   
+        return {"message": f"Reporte {report_id} eliminado exitosamente"}
     except Exception as e:
         print(f"Error al eliminar el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al eliminar el reporte: {str(e)}")
+    
+
+    
