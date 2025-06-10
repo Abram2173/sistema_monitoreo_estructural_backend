@@ -46,9 +46,10 @@ if not firebase_admin._apps:
 
 # Configurar CORS para permitir solicitudes desde el frontend
 origins = [
-    "http://localhost:3000",
+"http://localhost:3000",
     "https://eclectic-frangipane-39ee69.netlify.app",
-    "https://monitoreoestructural.net",  # Añade tu dominio aquí
+    "https://monitoreoestructural.net",
+    "https://www.monitoreoestructural.net"  # Si aplica
 ]
 
 app.add_middleware(
