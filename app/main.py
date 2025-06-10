@@ -48,6 +48,7 @@ if not firebase_admin._apps:
 origins = [
     "http://localhost:3000",
     "https://eclectic-frangipane-39ee69.netlify.app",
+    "https://monitoreoestructural.net",  # Añade tu dominio aquí
 ]
 
 app.add_middleware(
