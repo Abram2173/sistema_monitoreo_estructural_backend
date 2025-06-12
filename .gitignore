@@ -4,4 +4,3 @@ __pycache__/
 .env
 serviceAccountKey.json
 google-vision-credentials.json
-google-vision-credentials.json  

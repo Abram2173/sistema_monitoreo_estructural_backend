@@ -1,0 +1,26 @@
+[33m3e0b3ed[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Revert "Añadir google-vision-credentials.json y actualizar main.py"
+[33m7589f7c[m Eliminar secreto del historial y actualizar configuración
+[33m0b3a350[m Actualizar main.py y configurar credenciales vía variable de entorno
+[33m8b643df[m Añadir google-vision-credentials.json a .gitignore
+[33md32826d[m Añadir google-vision-credentials.json y actualizar main.py
+[33mabf60f5[m[33m ([m[1;31morigin/main[m[33m)[m Agregado la IA en la fastapi
+[33m3b86287[m Agregado la IA en la fastapi
+[33mb95aa2a[m Agregado la IA en la fastapi
+[33m1be94e9[m Actualizando origins para frontend
+[33m249f1df[m Actualizar orígenes de CORS
+[33mb578a53[m Añadir compresión de imágenes en el backend antes de guardarlas
+[33mf19cf8a[m Añadir compresión de imágenes en el backend antes de guardarlas
+[33m451ff68[m Añadir compresión de imágenes en el backend antes de guardarlas
+[33md49bc91[m Soportar dos imágenes por reporte en el backend
+[33m2668b9f[m Añadir Content-Length para descargas de imágenes
+[33mc277608[m Añadir Content-Length para descargas de imágenes
+[33m5600359[m Añadir soporte para descarga de imágenes en GET /api/reports/{report_id}/image
+[33m68c59f4[m Corregir error de sintaxis y almacenar imágenes en MongoDB
+[33m4cd6f6f[m Nuevo campo para la ruta de la imagen
+[33m72d064e[m Invalidar caché al iniciar nueva sesión para evitar roles incorrectos
+[33mdd906f7[m por pantalla o ventana de una de su session
+[33meb7c971[m Añadir endpoint DELETE para eliminar reportes (solo administrador)
+[33m5cc599d[m Permitir al supervisor aprobar/rechazar reportes con comentarios
+[33maea2737[m Usar email del supervisor en assigned_supervisor para consistencia
+[33m2555930[m ajustamos el reporte y admin
+[33m263cdd4[m Añadir depuración para cuerpo de la solicitud en reports.py
