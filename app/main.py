@@ -183,4 +183,4 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
 
-print("Aplicación configurada correctamente, iniciando servidor...")
+print("Aplicación configurada correctamente, iniciando servidor...") 
