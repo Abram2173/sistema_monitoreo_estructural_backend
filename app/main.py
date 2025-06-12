@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
 import firebase_admin
@@ -7,10 +7,13 @@ import os
 import base64
 import json
 import time
+import secrets
+from typing import List, Optional
+from pydantic import BaseModel
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
-    description="API para gestionar reportes de monitoreo estructural con autenticación de usuarios.",
+    description="API para gestionar reportes de monitoreo estructural con autenticación de usuarios e IA básica.",
     version="1.0.0"
 )
 
@@ -36,7 +39,12 @@ if not firebase_admin._apps:
         print("Decodificando FIREBASE_CREDENTIALS...")
         decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
         print("FIREBASE_CREDENTIALS decodificado correctamente")
-        cred = credentials.Certificate(json.loads(decoded_credentials))
+        cred_data = json.loads(decoded_credentials)
+        # Validar campos esenciales de las credenciales
+        required_fields = ["type", "project_id", "private_key_id", "private_key", "client_email", "client_id"]
+        if not all(field in cred_data for field in required_fields):
+            raise ValueError("Credenciales de Firebase incompletas o inválidas")
+        cred = credentials.Certificate(cred_data)
         print("Inicializando Firebase Admin SDK...")
         firebase_admin.initialize_app(cred)
         print("Firebase Admin SDK inicializado correctamente")
@@ -46,10 +54,10 @@ if not firebase_admin._apps:
 
 # Configurar CORS para permitir solicitudes desde el frontend
 origins = [
-"http://localhost:3000",
+    "http://localhost:3000",
     "https://eclectic-frangipane-39ee69.netlify.app",
     "https://monitoreoestructural.net",
-    "https://www.monitoreoestructural.net"  # Si aplica
+    "https://www.monitoreoestructural.net"
 ]
 
 app.add_middleware(
@@ -60,6 +68,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Modelo para los datos de reporte
+class ReportRequest(BaseModel):
+    location: str
+    description: str
+    measurements: dict
+    risk_level: str
+    comments: Optional[str] = None
+
 # Función para asegurar que el administrador exista en Firebase Authentication
 def ensure_admin_user():
     try:
@@ -68,14 +84,18 @@ def ensure_admin_user():
         print("Usuario administrador ya existe:", user.email)
     except firebase_auth.UserNotFoundError:
         print("Creando usuario administrador...")
+        admin_password = secrets.token_urlsafe(16)  # Contraseña segura
+        print(f"Contraseña generada para admin: {admin_password}")  # Quitar en producción
         firebase_auth.create_user(
             email="admin@example.com",
-            password="admin123",
+            password=admin_password,
             email_verified=True
         )
         print("Usuario administrador creado: admin@example.com")
+        # En producción, guarda la contraseña en un lugar seguro (e.g., variable de entorno)
     except Exception as e:
         print(f"Error al verificar/crear administrador: {str(e)}")
+        raise Exception(f"Error al verificar/crear administrador: {str(e)}")
 
 @app.on_event("startup")
 async def startup_event():
@@ -87,5 +107,51 @@ async def startup_event():
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(reports.router, prefix="/api", tags=["Reportes"])
 app.include_router(admin.router, prefix="/api", tags=["Administración"])
+
+# Nuevo endpoint para análisis de imágenes con IA
+@app.post("/api/analyze_images")
+async def analyze_images(token: str, files: List[UploadFile] = File(...)):
+    try:
+        # Verificar el token de autenticación
+        decoded_token = firebase_auth.verify_id_token(token)
+        uid = decoded_token['uid']
+        print(f"Usuario autenticado: {uid}")
+
+        if len(files) != 2:
+            raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
+
+        # Simulación básica de análisis de IA (reemplazar con un modelo real)
+        evaluation = "Análisis preliminar: posible grieta detectada en una imagen"
+        has_crack = True  # Lógica de IA aquí (por ejemplo, usando una API externa)
+
+        return {"evaluation": evaluation, "has_crack": has_crack}
+    except firebase_auth.InvalidIdTokenError:
+        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al analizar imágenes: {str(e)}")
+
+# Nuevo endpoint para subir reportes
+@app.post("/api/reports")
+async def create_report(token: str, report: ReportRequest, files: List[UploadFile] = File(...)):
+    try:
+        # Verificar el token de autenticación
+        decoded_token = firebase_auth.verify_id_token(token)
+        uid = decoded_token['uid']
+        print(f"Usuario autenticado: {uid}")
+
+        if len(files) != 2:
+            raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
+
+        # Simulación de almacenamiento o procesamiento del reporte
+        # En producción, guarda las imágenes y datos en una base de datos o sistema de archivos
+        print(f"Reporte recibido: {report.dict()}")
+        for file in files:
+            print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
+
+        return {"success": True, "message": "Reporte creado exitosamente"}
+    except firebase_auth.InvalidIdTokenError:
+        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
 
 print("Aplicación configurada correctamente, iniciando servidor...")
