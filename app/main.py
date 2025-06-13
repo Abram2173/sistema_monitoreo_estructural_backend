@@ -1,8 +1,8 @@
+import firebase_admin
+from firebase_admin import credentials, firestore
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
-import firebase_admin
-from firebase_admin import credentials, auth as firebase_auth
 import os
 import base64
 import json
@@ -15,8 +15,33 @@ from google.cloud import vision
 import requests
 from fastapi.security import OAuth2PasswordBearer
 from app.image_analyzer import analyze_image, get_image_content_from_url
-from firebase_admin import firestore
-from app.config.firebase import firebase_app  # Ajustado para usar la configuración de firebase.py
+
+# Inicializar Firebase globalmente antes de cualquier otra cosa
+firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
+if not firebase_admin._apps:
+    if not firebase_credentials:
+        print("FIREBASE_CREDENTIALS no está configurado en las variables de entorno")
+        raise Exception("FIREBASE_CREDENTIALS no está configurado")
+    try:
+        print("Decodificando FIREBASE_CREDENTIALS...")
+        decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
+        print("FIREBASE_CREDENTIALS decodificado correctamente")
+        cred_data = json.loads(decoded_credentials)
+        required_fields = ["type", "project_id", "private_key_id", "private_key", "client_email", "client_id"]
+        if not all(field in cred_data for field in required_fields):
+            raise ValueError("Credenciales de Firebase incompletas o inválidas")
+        cred = credentials.Certificate(cred_data)
+        firebase_admin.initialize_app(cred, {
+            'projectId': cred_data['project_id'],
+            'storageBucket': f"{cred_data['project_id']}.appspot.com"
+        })
+        print("Firebase Admin SDK inicializado correctamente")
+    except Exception as e:
+        print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
+        raise Exception(f"Error al inicializar Firebase Admin SDK: {str(e)}")
+
+# Inicializar Firestore globalmente
+db = firestore.client()
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -41,34 +66,6 @@ async def add_process_time_header(request: Request, call_next):
     return response
 
 print("Iniciando la aplicación...")
-
-# Usar la inicialización de Firebase desde firebase.py si está configurada
-if not firebase_admin._apps:
-    firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
-    if not firebase_credentials and not firebase_app:
-        print("FIREBASE_CREDENTIALS no está configurado en las variables de entorno y firebase.py no inicializó la app")
-        raise Exception("FIREBASE_CREDENTIALS no está configurado")
-    try:
-        if not firebase_app:
-            print("Decodificando FIREBASE_CREDENTIALS...")
-            decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
-            print("FIREBASE_CREDENTIALS decodificado correctamente")
-            cred_data = json.loads(decoded_credentials)
-            required_fields = ["type", "project_id", "private_key_id", "private_key", "client_email", "client_id"]
-            if not all(field in cred_data for field in required_fields):
-                raise ValueError("Credenciales de Firebase incompletas o inválidas")
-            cred = credentials.Certificate(cred_data)
-            firebase_admin.initialize_app(cred, {
-                'projectId': cred_data['project_id'],
-                'storageBucket': f"{cred_data['project_id']}.appspot.com"
-            })
-            print("Firebase Admin SDK inicializado correctamente")
-    except Exception as e:
-        print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
-        raise Exception(f"Error al inicializar Firebase Admin SDK: {str(e)}")
-
-# Inicializar Firestore
-db = firestore.client()
 
 # Configurar CORS para permitir solicitudes desde el frontend
 origins = [
@@ -100,23 +97,23 @@ class ReportRequest(BaseModel):
 def ensure_admin_user():
     try:
         print("Verificando si existe admin@example.com...")
-        user = firebase_auth.get_user_by_email("admin@example.com")
+        user = firebase_admin.auth.get_user_by_email("admin@example.com")
         print("Usuario administrador ya existe:", user.email)
         # Asegurarse de que el admin tenga el custom claim
         if 'admin' not in (user.custom_claims or {}):
-            firebase_auth.set_custom_user_claims(user.uid, {'admin': True, 'role': 'admin'})
+            firebase_admin.auth.set_custom_user_claims(user.uid, {'admin': True, 'role': 'admin'})
             print("Asignado custom claim 'admin' y 'role: admin' al usuario")
             print("Nota: El usuario debe refrescar su token para aplicar los nuevos claims")
-    except firebase_auth.UserNotFoundError:
+    except firebase_admin.auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
         print(f"Contraseña generada para admin: {admin_password}")  # Quitar en producción
-        user = firebase_auth.create_user(
+        user = firebase_admin.auth.create_user(
             email="admin@example.com",
             password=admin_password,
             email_verified=True
         )
-        firebase_auth.set_custom_user_claims(user.uid, {'admin': True, 'role': 'admin'})
+        firebase_admin.auth.set_custom_user_claims(user.uid, {'admin': True, 'role': 'admin'})
         print("Usuario administrador creado: admin@example.com con claims 'admin' y 'role: admin'")
     except Exception as e:
         print(f"Error al verificar/crear administrador: {str(e)}")
@@ -156,12 +153,12 @@ except Exception as e:
 # Dependency para obtener el rol del usuario
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
-        decoded_token = firebase_auth.verify_id_token(token)
+        decoded_token = firebase_admin.auth.verify_id_token(token)
         uid = decoded_token['uid']
-        user = firebase_auth.get_user(uid)
+        user = firebase_admin.auth.get_user(uid)
         role = user.custom_claims.get('role', 'user') if user.custom_claims else 'user'
         return {"uid": uid, "role": role}
-    except firebase_auth.InvalidIdTokenError:
+    except firebase_admin.auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
 
 # Endpoint para análisis de imágenes
@@ -202,7 +199,7 @@ async def get_user_status(current_user=Depends(get_current_user)):
     role = current_user["role"]
     print(f"Usuario autenticado: {uid}, rol: {role}")
 
-    if 'admin' not in (firebase_auth.get_user(uid).custom_claims or {}):
+    if 'admin' not in (firebase_admin.auth.get_user(uid).custom_claims or {}):
         raise HTTPException(status_code=403, detail="Solo administradores pueden ver el estado de usuarios")
 
     users_ref = db.collection('users')

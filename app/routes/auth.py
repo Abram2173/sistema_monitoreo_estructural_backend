@@ -4,13 +4,12 @@ from app.config.database import users_collection
 from firebase_admin import auth
 import os
 from cachetools import TTLCache
-from firebase_admin import firestore
-from pymongo.errors import ServerSelectionTimeoutError
+from firebase_admin import firestore  # Importar solo para referencia, no inicialización
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 cache = TTLCache(maxsize=100, ttl=300)
-db = firestore.client()
+db = firestore.client()  # Usar la instancia global inicializada en main.py
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
@@ -36,8 +35,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         user = None
         try:
             user = await users_collection.find_one({"email": email}, serverSelectionTimeoutMS=5000)
-        except ServerSelectionTimeoutError:
-            print(f"Timeout al consultar MongoDB para {email}, usando solo custom claims")
+        except Exception as e:
+            print(f"Timeout o error al consultar MongoDB para {email}: {str(e)}, usando solo custom claims")
             user = None
 
         if not user:
