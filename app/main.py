@@ -56,7 +56,7 @@ if not firebase_admin._apps:
         if not all(field in cred_data for field in required_fields):
             raise ValueError("Credenciales de Firebase incompletas o inválidas")
         cred = credentials.Certificate(cred_data)
-        firebase_admin.initialize_app(cred)
+        firebase_admin.initialize_app(cred, {'storageBucket': 'your-project-id.appspot.com'})  # Ajusta el bucket
         print("Firebase Admin SDK inicializado correctamente")
     except Exception as e:
         print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
@@ -97,16 +97,21 @@ def ensure_admin_user():
         print("Verificando si existe admin@example.com...")
         user = firebase_auth.get_user_by_email("admin@example.com")
         print("Usuario administrador ya existe:", user.email)
+        # Asegurarse de que el admin tenga el custom claim
+        if 'admin' not in (user.custom_claims or {}):
+            firebase_auth.set_custom_user_claims(user.uid, {'admin': True})
+            print("Asignado custom claim 'admin' al usuario")
     except firebase_auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
         print(f"Contraseña generada para admin: {admin_password}")  # Quitar en producción
-        firebase_auth.create_user(
+        user = firebase_auth.create_user(
             email="admin@example.com",
             password=admin_password,
             email_verified=True
         )
-        print("Usuario administrador creado: admin@example.com")
+        firebase_auth.set_custom_user_claims(user.uid, {'admin': True})
+        print("Usuario administrador creado: admin@example.com con claim 'admin'")
     except Exception as e:
         print(f"Error al verificar/crear administrador: {str(e)}")
         raise Exception(f"Error al verificar/crear administrador: {str(e)}")
@@ -214,7 +219,11 @@ async def get_user_status(token: str = Depends(oauth2_scheme)):
         return status_list
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
+    except firebase_admin.exceptions.FirebaseError as e:
+        print(f"Error de Firestore: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al acceder a Firestore: {str(e)}")
     except Exception as e:
+        print(f"Error inesperado: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al obtener estado de usuarios: {str(e)}")
 
 # Nuevo endpoint para subir reportes (sin guardado local)
