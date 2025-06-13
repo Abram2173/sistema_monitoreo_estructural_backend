@@ -156,13 +156,18 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
         image_content = None
         if files and files[0]:
             image_content = await files[0].read()
+            print(f"Procesando archivo: {files[0].filename}, tamaño: {len(image_content)} bytes")
         elif image_urls and image_urls[0]:
             try:
-                response = requests.get(image_urls[0], headers={'Authorization': f'Bearer {token}'}, timeout=10)
+                headers = {'Authorization': f'Bearer {token}'}
+                response = requests.get(image_urls[0], headers=headers, timeout=10, stream=True)
                 if response.status_code != 200:
+                    print(f"Error al descargar URL: {response.status_code}, {response.text}")
                     raise HTTPException(status_code=400, detail=f"URL de imagen no accesible: {response.status_code}")
                 image_content = response.content
+                print(f"Descargada URL: {image_urls[0]}, tamaño: {len(image_content)} bytes")
             except requests.exceptions.RequestException as e:
+                print(f"Excepción al descargar URL: {str(e)}")
                 raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
 
         if not image_content:
@@ -170,8 +175,13 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
 
         # Analizar la imagen con Google Cloud Vision
         image = vision.Image(content=image_content)
-        response = client.label_detection(image=image)
-        labels = [label.description.lower() for label in response.label_annotations]
+        try:
+            response = client.label_detection(image=image)
+            labels = [label.description.lower() for label in response.label_annotations]
+            print(f"Etiquetas detectadas: {labels}")
+        except Exception as e:
+            print(f"Error en label_detection: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error al procesar la imagen con Vision API: {str(e)}")
 
         # Detectar riesgos (grietas, daños, deformaciones)
         has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
