@@ -53,6 +53,7 @@ uritemplate==4.1.1
 urllib3==2.4.0
 uvicorn==0.30.6
 motor
-opencv-python
-opencv-python
-opencv-python
+Pillow
+Pillow
+Pillow
+Pillow

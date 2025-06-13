@@ -10,8 +10,8 @@ import time
 import secrets
 from typing import List, Optional
 from pydantic import BaseModel
-import cv2
-import numpy as np
+from PIL import Image
+import io
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -116,22 +116,20 @@ async def get_current_user(token: str):
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
 
-# Nuevo endpoint para análisis de imágenes con IA manual usando OpenCV
+# Nuevo endpoint para análisis de imágenes con IA manual usando PIL (sin OpenCV)
 @app.post("/api/analyze_image_manual")
 async def analyze_image_manual(file: UploadFile = File(...), token: str = Depends(get_current_user)):
     try:
         uid = token['uid']
         print(f"Usuario autenticado: {uid}")
 
-        # Leer y procesar la imagen con OpenCV
+        # Leer la imagen con PIL
         image_content = await file.read()
-        image = cv2.imdecode(np.frombuffer(image_content, np.uint8), cv2.IMREAD_COLOR)
-        if image is None:
-            raise HTTPException(status_code=400, detail="Imagen no válida")
-
-        # Análisis básico con Canny para detectar bordes (simplificado para grietas)
-        edges = cv2.Canny(image, 100, 200)
-        has_crack = np.sum(edges) > 1000  # Umbral simple para bordes
+        image = Image.open(io.BytesIO(image_content))
+        image = image.convert('L')  # Convertir a escala de grises
+        pixels = list(image.getdata())
+        brightness = sum(pixels) / len(pixels)  # Promedio de brillo
+        has_crack = brightness < 100  # Umbral simple para detectar áreas oscuras (ajusta según necesidad)
         evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente")
 
         return {"evaluation": evaluation, "has_crack": has_crack}
