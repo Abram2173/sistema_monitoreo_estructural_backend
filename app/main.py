@@ -192,11 +192,29 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         for file in files:
             print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
 
+        # En producción, guarda en MongoDB o base de datos
         return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack}
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
+
+# Endpoint para actualizar reportes (manejo de acciones del supervisor)
+@app.put("/api/reports/{report_id}")
+async def update_report(report_id: str, update_data: dict, token: str = Depends(oauth2_scheme)):
+    try:
+        decoded_token = firebase_auth.verify_id_token(token)
+        uid = decoded_token['uid']
+        print(f"Usuario autenticado: {uid} actualizando reporte {report_id}")
+
+        # Simulación de actualización (en producción, actualiza en MongoDB)
+        # Aquí deberías buscar y actualizar el reporte en tu base de datos
+        print(f"Reporte {report_id} actualizado con: {update_data}")
+        return {"success": True, "message": "Reporte actualizado exitosamente"}
+    except firebase_auth.InvalidIdTokenError:
+        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al actualizar el reporte: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
