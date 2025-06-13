@@ -157,10 +157,13 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
         if files and files[0]:
             image_content = await files[0].read()
         elif image_urls and image_urls[0]:
-            response = requests.get(image_urls[0], timeout=10)
-            if response.status_code != 200:
-                raise HTTPException(status_code=400, detail="URL de imagen no accesible")
-            image_content = response.content
+            try:
+                response = requests.get(image_urls[0], headers={'Authorization': f'Bearer {token}'}, timeout=10)
+                if response.status_code != 200:
+                    raise HTTPException(status_code=400, detail=f"URL de imagen no accesible: {response.status_code}")
+                image_content = response.content
+            except requests.exceptions.RequestException as e:
+                raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
 
         if not image_content:
             raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
