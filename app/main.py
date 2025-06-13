@@ -16,6 +16,7 @@ import requests
 from fastapi.security import OAuth2PasswordBearer
 from app.image_analyzer import analyze_image, get_image_content_from_url
 from firebase_admin import firestore
+from app.config.firebase import firebase_app  # Ajustado para usar la configuración de firebase.py
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -41,26 +42,27 @@ async def add_process_time_header(request: Request, call_next):
 
 print("Iniciando la aplicación...")
 
-# Inicializar Firebase Admin SDK con Firestore
-firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
+# Usar la inicialización de Firebase desde firebase.py si está configurada
 if not firebase_admin._apps:
-    if not firebase_credentials:
-        print("FIREBASE_CREDENTIALS no está configurado en las variables de entorno")
-        raise Exception("FIREBASE_CREDENTIALS no está configurado en las variables de entorno")
+    firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
+    if not firebase_credentials and not firebase_app:
+        print("FIREBASE_CREDENTIALS no está configurado en las variables de entorno y firebase.py no inicializó la app")
+        raise Exception("FIREBASE_CREDENTIALS no está configurado")
     try:
-        print("Decodificando FIREBASE_CREDENTIALS...")
-        decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
-        print("FIREBASE_CREDENTIALS decodificado correctamente")
-        cred_data = json.loads(decoded_credentials)
-        required_fields = ["type", "project_id", "private_key_id", "private_key", "client_email", "client_id"]
-        if not all(field in cred_data for field in required_fields):
-            raise ValueError("Credenciales de Firebase incompletas o inválidas")
-        cred = credentials.Certificate(cred_data)
-        firebase_admin.initialize_app(cred, {
-            'projectId': cred_data['project_id'],
-            'storageBucket': f"{cred_data['project_id']}.appspot.com"
-        })
-        print("Firebase Admin SDK inicializado correctamente")
+        if not firebase_app:
+            print("Decodificando FIREBASE_CREDENTIALS...")
+            decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
+            print("FIREBASE_CREDENTIALS decodificado correctamente")
+            cred_data = json.loads(decoded_credentials)
+            required_fields = ["type", "project_id", "private_key_id", "private_key", "client_email", "client_id"]
+            if not all(field in cred_data for field in required_fields):
+                raise ValueError("Credenciales de Firebase incompletas o inválidas")
+            cred = credentials.Certificate(cred_data)
+            firebase_admin.initialize_app(cred, {
+                'projectId': cred_data['project_id'],
+                'storageBucket': f"{cred_data['project_id']}.appspot.com"
+            })
+            print("Firebase Admin SDK inicializado correctamente")
     except Exception as e:
         print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
         raise Exception(f"Error al inicializar Firebase Admin SDK: {str(e)}")
@@ -102,10 +104,9 @@ def ensure_admin_user():
         print("Usuario administrador ya existe:", user.email)
         # Asegurarse de que el admin tenga el custom claim
         if 'admin' not in (user.custom_claims or {}):
-            firebase_auth.set_custom_user_claims(user.uid, {'admin': True})
-            print("Asignado custom claim 'admin' al usuario")
-            # Forzar refresco del token (esto debe manejarse en el frontend)
-            print("Nota: El usuario debe refrescar su token para aplicar el nuevo claim")
+            firebase_auth.set_custom_user_claims(user.uid, {'admin': True, 'role': 'admin'})
+            print("Asignado custom claim 'admin' y 'role: admin' al usuario")
+            print("Nota: El usuario debe refrescar su token para aplicar los nuevos claims")
     except firebase_auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
@@ -115,8 +116,8 @@ def ensure_admin_user():
             password=admin_password,
             email_verified=True
         )
-        firebase_auth.set_custom_user_claims(user.uid, {'admin': True})
-        print("Usuario administrador creado: admin@example.com con claim 'admin'")
+        firebase_auth.set_custom_user_claims(user.uid, {'admin': True, 'role': 'admin'})
+        print("Usuario administrador creado: admin@example.com con claims 'admin' y 'role: admin'")
     except Exception as e:
         print(f"Error al verificar/crear administrador: {str(e)}")
         raise Exception(f"Error al verificar/crear administrador: {str(e)}")
@@ -138,7 +139,6 @@ if not google_credentials:
     print("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
     raise Exception("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
 try:
-    # Si es base64, decodificar; si es ruta, usar directamente
     if google_credentials.startswith("ew"):  # Suponiendo base64
         decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')
         cred_data = json.loads(decoded_credentials)
@@ -153,160 +153,121 @@ except Exception as e:
     print(f"Error al inicializar Google Cloud Vision: {str(e)}")
     raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
 
-# Nuevo endpoint para análisis de imágenes con IA usando image_analyzer
-@app.post("/api/analyze_images")
-async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(None), image_urls: list[str] = None):
-    try:
-        # Verificar el token de autenticación con Firebase
-        decoded_token = firebase_auth.verify_id_token(token)
-        uid = decoded_token['uid']
-        print(f"Usuario autenticado: {uid}")
-
-        # Actualizar estado del usuario como activo
-        user_ref = db.collection('users').document(uid)
-        user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
-
-        # Verificar si se enviaron archivos o URLs
-        if not files and not image_urls:
-            raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
-        if files and len(files) > 2:
-            raise HTTPException(status_code=400, detail="Se permiten máximo 2 imágenes")
-        if image_urls and len(image_urls) > 2:
-            raise HTTPException(status_code=400, detail="Se permiten máximo 2 URLs de imágenes")
-
-        # Usar la primera imagen disponible
-        image_content = None
-        if files and files[0]:
-            image_content = await files[0].read()
-            print(f"Procesando archivo: {files[0].filename}, tamaño: {len(image_content)} bytes")
-        elif image_urls and image_urls[0]:
-            headers = {'Authorization': f'Bearer {token}'}
-            image_content = get_image_content_from_url(f"{BASE_URL}{image_urls[0]}", headers)
-
-        if not image_content:
-            raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
-
-        # Analizar la imagen con el módulo separado
-        result = analyze_image(image_content)
-        return result
-    except firebase_auth.InvalidIdTokenError:
-        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al analizar imágenes: {str(e)}")
-    finally:
-        # Actualizar last_seen al salir
-        user_ref.set({'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
-
-# Nuevo endpoint para obtener estado de usuarios
-@app.get("/api/users/status")
-async def get_user_status(token: str = Depends(oauth2_scheme)):
+# Dependency para obtener el rol del usuario
+def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
-        print(f"Usuario autenticado: {uid} consultando estado de usuarios")
-
-        # Verificar si el usuario es administrador usando custom claims
-        user = firebase_auth.get_user(uid)
-        if 'admin' not in (user.custom_claims or {}):
-            raise HTTPException(status_code=403, detail="Solo administradores pueden ver el estado de usuarios")
-
-        users_ref = db.collection('users')
-        users = users_ref.get()
-        status_list = []
-        for user_doc in users:
-            user_data = user_doc.to_dict()
-            status_list.append({
-                'uid': user_doc.id,
-                'email': user_data.get('email', ''),
-                'status': user_data.get('status', 'inactive'),
-                'last_seen': user_data.get('last_seen', None)
-            })
-        return status_list
-    except firebase_auth.InvalidIdTokenError:
-        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
-    except firebase_admin.exceptions.FirebaseError as e:
-        print(f"Error de Firestore: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al acceder a Firestore: {str(e)}")
-    except Exception as e:
-        print(f"Error inesperado: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al obtener estado de usuarios: {str(e)}")
-
-# Nuevo endpoint para subir reportes
-@app.post("/api/reports")
-async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), token: str = Depends(oauth2_scheme)):
-    try:
-        decoded_token = firebase_auth.verify_id_token(token)
-        uid = decoded_token['uid']
-        print(f"Usuario autenticado: {uid}")
-
-        # Verificar rol del usuario
         user = firebase_auth.get_user(uid)
         role = user.custom_claims.get('role', 'user') if user.custom_claims else 'user'
-        if role not in ['inspector', 'admin']:
-            raise HTTPException(status_code=403, detail="Solo inspectores o administradores pueden crear reportes")
-
-        # Actualizar estado del usuario como activo
-        user_ref = db.collection('users').document(uid)
-        user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
-
-        if len(files) != 2:
-            raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
-
-        # Analizar la primera imagen con Google Cloud Vision
-        image_content = await files[0].read()
-        image = vision.Image(content=image_content)
-        response = client.label_detection(image=image)
-        labels = [label.description.lower() for label in response.label_annotations]
-        has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
-        evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
-
-        # Actualizar el reporte con los resultados de IA
-        updated_report = report.dict()
-        updated_report["evaluation"] = evaluation
-        updated_report["has_crack"] = has_crack
-        updated_report["id"] = str(uuid.uuid4())
-        updated_report["inspector_id"] = uid
-
-        # Simulación de almacenamiento (en producción, guarda en MongoDB)
-        print(f"Reporte recibido: {updated_report}")
-        for file in files:
-            print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
-
-        return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack, "id": updated_report["id"]}
+        return {"uid": uid, "role": role}
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
-    finally:
-        user_ref.set({'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
+
+# Endpoint para análisis de imágenes
+@app.post("/api/analyze_images")
+async def analyze_images(current_user=Depends(get_current_user), files: list[UploadFile] = File(None), image_urls: list[str] = None):
+    uid = current_user["uid"]
+    role = current_user["role"]
+    print(f"Usuario autenticado: {uid}, rol: {role}")
+
+    user_ref = db.collection('users').document(uid)
+    user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
+
+    if not files and not image_urls:
+        raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
+    if files and len(files) > 2:
+        raise HTTPException(status_code=400, detail="Se permiten máximo 2 imágenes")
+    if image_urls and len(image_urls) > 2:
+        raise HTTPException(status_code=400, detail="Se permiten máximo 2 URLs de imágenes")
+
+    image_content = None
+    if files and files[0]:
+        image_content = await files[0].read()
+        print(f"Procesando archivo: {files[0].filename}, tamaño: {len(image_content)} bytes")
+    elif image_urls and image_urls[0]:
+        headers = {'Authorization': f'Bearer {oauth2_scheme}'}
+        image_content = get_image_content_from_url(f"{BASE_URL}{image_urls[0]}", headers)
+
+    if not image_content:
+        raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
+
+    result = analyze_image(image_content)
+    return result
+
+# Endpoint para obtener estado de usuarios
+@app.get("/api/users/status")
+async def get_user_status(current_user=Depends(get_current_user)):
+    uid = current_user["uid"]
+    role = current_user["role"]
+    print(f"Usuario autenticado: {uid}, rol: {role}")
+
+    if 'admin' not in (firebase_auth.get_user(uid).custom_claims or {}):
+        raise HTTPException(status_code=403, detail="Solo administradores pueden ver el estado de usuarios")
+
+    users_ref = db.collection('users')
+    users = users_ref.get()
+    status_list = []
+    for user_doc in users:
+        user_data = user_doc.to_dict()
+        status_list.append({
+            'uid': user_doc.id,
+            'email': user_data.get('email', ''),
+            'status': user_data.get('status', 'inactive'),
+            'last_seen': user_data.get('last_seen', None)
+        })
+    return status_list or []
+
+# Endpoint para subir reportes
+@app.post("/api/reports")
+async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), current_user=Depends(get_current_user)):
+    uid = current_user["uid"]
+    role = current_user["role"]
+    print(f"Usuario autenticado: {uid}, rol: {role}")
+
+    if role not in ['inspector', 'admin']:
+        raise HTTPException(status_code=403, detail="Solo inspectores o administradores pueden crear reportes")
+
+    user_ref = db.collection('users').document(uid)
+    user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
+
+    if len(files) != 2:
+        raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
+
+    image_content = await files[0].read()
+    image = vision.Image(content=image_content)
+    response = client.label_detection(image=image)
+    labels = [label.description.lower() for label in response.label_annotations]
+    has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
+    evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
+
+    updated_report = report.dict()
+    updated_report["evaluation"] = evaluation
+    updated_report["has_crack"] = has_crack
+    updated_report["id"] = str(uuid.uuid4())
+    updated_report["inspector_id"] = uid
+
+    print(f"Reporte recibido: {updated_report}")
+    for file in files:
+        print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
+
+    return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack, "id": updated_report["id"]}
 
 # Endpoint para actualizar reportes
 @app.put("/api/reports/{report_id}")
-async def update_report(report_id: str, update_data: dict, token: str = Depends(oauth2_scheme)):
-    try:
-        decoded_token = firebase_auth.verify_id_token(token)
-        uid = decoded_token['uid']
-        print(f"Usuario autenticado: {uid} actualizando reporte {report_id}")
+async def update_report(report_id: str, update_data: dict, current_user=Depends(get_current_user)):
+    uid = current_user["uid"]
+    role = current_user["role"]
+    print(f"Usuario autenticado: {uid}, rol: {role}")
 
-        # Verificar rol del usuario
-        user = firebase_auth.get_user(uid)
-        role = user.custom_claims.get('role', 'user') if user.custom_claims else 'user'
-        if role not in ['supervisor', 'admin']:
-            raise HTTPException(status_code=403, detail="Solo supervisores o administradores pueden actualizar reportes")
+    if role not in ['supervisor', 'admin']:
+        raise HTTPException(status_code=403, detail="Solo supervisores o administradores pueden actualizar reportes")
 
-        # Actualizar estado del usuario como activo
-        user_ref = db.collection('users').document(uid)
-        user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
+    user_ref = db.collection('users').document(uid)
+    user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
 
-        # Simulación de actualización (en producción, actualiza en MongoDB)
-        print(f"Reporte {report_id} actualizado con: {update_data}")
-        return {"success": True, "message": "Reporte actualizado exitosamente"}
-    except firebase_auth.InvalidIdTokenError:
-        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al actualizar el reporte: {str(e)}")
-    finally:
-        user_ref.set({'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
+    print(f"Reporte {report_id} actualizado con: {update_data}")
+    return {"success": True, "message": "Reporte actualizado exitosamente"}
 
 if __name__ == "__main__":
     import uvicorn
