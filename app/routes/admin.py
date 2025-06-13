@@ -95,7 +95,7 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             "email": user.email,
             "role": user.role,
             "name": user.name,
-            "last_activity": datetime.utcnow()  # Inicializar last_activity al crear el usuario
+            "last_activity": datetime.utcnow().isoformat() + "+00:00"  # Formato ISO explícito
         }
         print(f"Datos a guardar: {user_dict}")
         await users_collection.insert_one(user_dict)
@@ -194,7 +194,7 @@ async def assign_report(assignment: ReportAssign, current_user: dict = Depends(g
         # Actualizar last_activity del supervisor
         await users_collection.update_one(
             {"email": supervisor_email},
-            {"$set": {"last_activity": datetime.utcnow()}}
+            {"$set": {"last_activity": datetime.utcnow().isoformat() + "+00:00"}}
         )
         print(f"last_activity actualizado para {supervisor_email}")
 
@@ -208,13 +208,23 @@ async def get_users_status(current_user: dict = Depends(get_current_admin_user))
     try:
         users_status = []
         async for user in users_collection.find():
+            last_activity = user.get("last_activity")
             is_active = False
-            if user.get("last_activity"):
-                last_activity = datetime.fromisoformat(user["last_activity"])
-                is_active = (datetime.utcnow() - last_activity) < timedelta(minutes=5)
+            if last_activity:
+                if isinstance(last_activity, str):
+                    try:
+                        # Ajustar el formato si termina en 'Z' o no tiene zona horaria
+                        last_activity_str = last_activity.replace("Z", "+00:00") if "Z" in last_activity else last_activity
+                        last_activity_dt = datetime.fromisoformat(last_activity_str)
+                        is_active = (datetime.utcnow() - last_activity_dt) < timedelta(minutes=5)
+                    except ValueError as ve:
+                        print(f"Formato inválido de last_activity para {user.get('username')}: {last_activity}, usando fallback")
+                        is_active = False  # Fallback si el formato falla
+                elif isinstance(last_activity, datetime):
+                    is_active = (datetime.utcnow() - last_activity) < timedelta(minutes=5)
             users_status.append({
-                "username": user.get("username"),
-                "role": user.get("role"),
+                "username": user.get("username", "Desconocido"),
+                "role": user.get("role", "Desconocido"),
                 "is_active": is_active
             })
         print(f"Estado de usuarios devuelto: {users_status}")
