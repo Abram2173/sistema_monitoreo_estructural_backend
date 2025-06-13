@@ -205,7 +205,7 @@ async def get_user_status(token: str = Depends(oauth2_scheme)):
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid} consultando estado de usuarios")
 
-        # Verificar si el usuario es administrador
+        # Verificar si el usuario es administrador usando custom claims
         user = firebase_auth.get_user(uid)
         if 'admin' not in (user.custom_claims or {}):
             raise HTTPException(status_code=403, detail="Solo administradores pueden ver el estado de usuarios")
@@ -231,20 +231,19 @@ async def get_user_status(token: str = Depends(oauth2_scheme)):
         print(f"Error inesperado: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al obtener estado de usuarios: {str(e)}")
 
-# Nuevo endpoint para subir reportes (sin guardado local)
+# Nuevo endpoint para subir reportes
 @app.post("/api/reports")
 async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), token: str = Depends(oauth2_scheme)):
     try:
-        # Verificar el token de autenticación
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid}")
 
-        # Obtener el rol del usuario desde el token o la base de datos
+        # Verificar rol del usuario
         user = firebase_auth.get_user(uid)
         role = user.custom_claims.get('role', 'user') if user.custom_claims else 'user'
-        if role != 'inspector' and role != 'admin':
-            raise HTTPException(status_code=403, detail="Solo inspectores pueden crear reportes")
+        if role not in ['inspector', 'admin']:
+            raise HTTPException(status_code=403, detail="Solo inspectores o administradores pueden crear reportes")
 
         # Actualizar estado del usuario como activo
         user_ref = db.collection('users').document(uid)
@@ -265,8 +264,8 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         updated_report = report.dict()
         updated_report["evaluation"] = evaluation
         updated_report["has_crack"] = has_crack
-        updated_report["id"] = str(uuid.uuid4())  # Generar ID único
-        updated_report["inspector_id"] = uid  # Añadir el UID del inspector
+        updated_report["id"] = str(uuid.uuid4())
+        updated_report["inspector_id"] = uid
 
         # Simulación de almacenamiento (en producción, guarda en MongoDB)
         print(f"Reporte recibido: {updated_report}")
@@ -279,10 +278,9 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
     finally:
-        # Actualizar last_seen al salir
         user_ref.set({'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
 
-# Endpoint para actualizar reportes (manejo de acciones del supervisor)
+# Endpoint para actualizar reportes
 @app.put("/api/reports/{report_id}")
 async def update_report(report_id: str, update_data: dict, token: str = Depends(oauth2_scheme)):
     try:
@@ -290,18 +288,17 @@ async def update_report(report_id: str, update_data: dict, token: str = Depends(
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid} actualizando reporte {report_id}")
 
-        # Obtener el rol del usuario desde el token o la base de datos
+        # Verificar rol del usuario
         user = firebase_auth.get_user(uid)
         role = user.custom_claims.get('role', 'user') if user.custom_claims else 'user'
-        if role != 'supervisor' and role != 'admin':
-            raise HTTPException(status_code=403, detail="Solo supervisores pueden actualizar reportes")
+        if role not in ['supervisor', 'admin']:
+            raise HTTPException(status_code=403, detail="Solo supervisores o administradores pueden actualizar reportes")
 
         # Actualizar estado del usuario como activo
         user_ref = db.collection('users').document(uid)
         user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
 
         # Simulación de actualización (en producción, actualiza en MongoDB)
-        # Aquí deberías buscar y actualizar el reporte en tu base de datos
         print(f"Reporte {report_id} actualizado con: {update_data}")
         return {"success": True, "message": "Reporte actualizado exitosamente"}
     except firebase_auth.InvalidIdTokenError:
@@ -309,7 +306,6 @@ async def update_report(report_id: str, update_data: dict, token: str = Depends(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al actualizar el reporte: {str(e)}")
     finally:
-        # Actualizar last_seen al salir
         user_ref.set({'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
 
 if __name__ == "__main__":
