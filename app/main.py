@@ -11,6 +11,7 @@ import secrets
 from typing import List, Optional
 from pydantic import BaseModel
 from google.cloud import vision
+import requests
 from fastapi.security import OAuth2PasswordBearer
 
 app = FastAPI(
@@ -134,20 +135,37 @@ except Exception as e:
     print(f"Error al inicializar Google Cloud Vision: {str(e)}")
     raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
 
-# Nuevo endpoint para análisis de imágenes con IA
+# Nuevo endpoint para análisis de imágenes con IA (acepta archivos o URLs)
 @app.post("/api/analyze_images")
-async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(...)):
+async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(None), image_urls: list[str] = None):
     try:
         # Verificar el token de autenticación con Firebase
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid}")
 
-        if len(files) != 2:
-            raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
+        # Verificar si se enviaron archivos o URLs
+        if not files and not image_urls:
+            raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
+        if files and len(files) > 2:
+            raise HTTPException(status_code=400, detail="Se permiten máximo 2 imágenes")
+        if image_urls and len(image_urls) > 2:
+            raise HTTPException(status_code=400, detail="Se permiten máximo 2 URLs de imágenes")
 
-        # Analizar la primera imagen con Google Cloud Vision
-        image_content = await files[0].read()
+        # Usar la primera imagen disponible (archivo o URL)
+        image_content = None
+        if files and files[0]:
+            image_content = await files[0].read()
+        elif image_urls and image_urls[0]:
+            response = requests.get(image_urls[0], timeout=10)
+            if response.status_code != 200:
+                raise HTTPException(status_code=400, detail="URL de imagen no accesible")
+            image_content = response.content
+
+        if not image_content:
+            raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
+
+        # Analizar la imagen con Google Cloud Vision
         image = vision.Image(content=image_content)
         response = client.label_detection(image=image)
         labels = [label.description.lower() for label in response.label_annotations]
@@ -159,6 +177,8 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
         return {"evaluation": evaluation, "has_crack": has_crack}
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al analizar imágenes: {str(e)}")
 
@@ -174,7 +194,7 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         if len(files) != 2:
             raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
 
-        # Analizar imágenes antes de guardar el reporte
+        # Analizar la primera imagen con Google Cloud Vision
         image_content = await files[0].read()
         image = vision.Image(content=image_content)
         response = client.label_detection(image=image)
@@ -192,7 +212,6 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         for file in files:
             print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
 
-        # En producción, guarda en MongoDB o base de datos
         return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack}
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
