@@ -12,7 +12,6 @@ from typing import List, Optional
 from pydantic import BaseModel
 from google.cloud import vision
 from fastapi.security import OAuth2PasswordBearer
-import uvicorn
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -92,7 +91,7 @@ def ensure_admin_user():
     except firebase_auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
-        print(f"Contraseña generada para admin: {admin_password}")
+        print(f"Contraseña generada para admin: {admin_password}")  # Quitar en producción
         firebase_auth.create_user(
             email="admin@example.com",
             password=admin_password,
@@ -120,7 +119,8 @@ if not google_credentials:
     print("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
     raise Exception("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
 try:
-    if google_credentials.startswith("ew"):
+    # Si es base64, decodificar; si es ruta, usar directamente
+    if google_credentials.startswith("ew"):  # Suponiendo base64
         decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')
         cred_data = json.loads(decoded_credentials)
         with open("temp_credentials.json", "w") as f:
@@ -136,7 +136,7 @@ except Exception as e:
 
 # Nuevo endpoint para análisis de imágenes con IA
 @app.post("/api/analyze_images")
-async def analyze_images(token: str = Depends(oauth2_scheme), files: List[UploadFile] = File(...)):
+async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(...)):
     try:
         # Verificar el token de autenticación con Firebase
         decoded_token = firebase_auth.verify_id_token(token)
@@ -164,7 +164,7 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: List[Upload
 
 # Nuevo endpoint para subir reportes (almacena resultados de IA)
 @app.post("/api/reports")
-async def create_report(report: ReportRequest, files: List[UploadFile] = File(...), token: str = Depends(oauth2_scheme)):
+async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), token: str = Depends(oauth2_scheme)):
     try:
         # Verificar el token de autenticación
         decoded_token = firebase_auth.verify_id_token(token)
