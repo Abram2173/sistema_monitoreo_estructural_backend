@@ -4,6 +4,7 @@ from app.config.database import users_collection
 from firebase_admin import auth
 import os
 from cachetools import TTLCache
+from datetime import datetime  # Añadimos esta importación
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -41,12 +42,18 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
                 "username": username,
                 "email": email,
                 "role": role,
-                "name": username.capitalize()
+                "name": username.capitalize(),
+                "last_activity": datetime.utcnow().isoformat() + "+00:00"  # Inicializar al crear
             }
             await users_collection.insert_one(new_user)
             user = new_user
         else:
             print(f"Usuario encontrado en MongoDB: {user}")
+            # Actualizar last_activity al autenticarse
+            await users_collection.update_one(
+                {"email": email},
+                {"$set": {"last_activity": datetime.utcnow().isoformat() + "+00:00"}}
+            )
 
         role = custom_claims if custom_claims else user["role"]
         print(f"Rol determinado para {email}: {role}")
