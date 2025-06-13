@@ -79,8 +79,8 @@ class ReportRequest(BaseModel):
     measurements: dict
     risk_level: str
     comments: Optional[str] = None
-    evaluation: Optional[str] = None  # Para guardar el resultado de IA
-    has_crack: Optional[bool] = None  # Para guardar el resultado de IA
+    evaluation: Optional[str] = None
+    has_crack: Optional[bool] = None
 
 # Función para asegurar que el administrador exista en Firebase Authentication
 def ensure_admin_user():
@@ -120,7 +120,7 @@ if not google_credentials:
     raise Exception("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
 try:
     # Si es base64, decodificar; si es ruta, usar directamente
-    if google_credentials.startswith("ew"):  # Suponiendo base64 (puede variar)
+    if google_credentials.startswith("ew"):  # Suponiendo base64
         decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')
         cred_data = json.loads(decoded_credentials)
         with open("temp_credentials.json", "w") as f:
