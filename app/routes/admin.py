@@ -95,7 +95,7 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             "email": user.email,
             "role": user.role,
             "name": user.name,
-            "last_activity": datetime.utcnow().isoformat() + "+00:00"  # Formato ISO explícito
+            "last_activity": datetime.utcnow().isoformat() + "+00:00"
         }
         print(f"Datos a guardar: {user_dict}")
         await users_collection.insert_one(user_dict)
@@ -210,7 +210,7 @@ async def get_users_status(current_user: dict = Depends(get_current_admin_user))
         async for user in users_collection.find():
             last_activity = user.get("last_activity")
             is_active = False
-            if last_activity:
+            if last_activity is not None:
                 if isinstance(last_activity, str):
                     try:
                         # Ajustar el formato si termina en 'Z' o no tiene zona horaria
