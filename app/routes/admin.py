@@ -7,7 +7,6 @@ from firebase_admin import auth as firebase_auth
 from pydantic import BaseModel
 from bson import ObjectId
 from datetime import datetime, timedelta
-from dateutil import parser  # Añadimos dateutil.parser para un parsing más robusto
 
 router = APIRouter()
 
@@ -214,11 +213,9 @@ async def get_users_status(current_user: dict = Depends(get_current_admin_user))
             if last_activity is not None:
                 if isinstance(last_activity, str):
                     try:
-                        # Usar dateutil.parser para un manejo más robusto de fechas
-                        last_activity_dt = parser.parse(last_activity)
-                        # Ajustar a UTC si no tiene zona horaria
-                        if last_activity_dt.tzinfo is None:
-                            last_activity_dt = last_activity_dt.replace(tzinfo=datetime.timezone.utc)
+                        # Usar strptime con un formato específico que ignore microsegundos
+                        last_activity_str = last_activity.split('.')[0] + "+00:00"  # Eliminar microsegundos
+                        last_activity_dt = datetime.strptime(last_activity_str, "%Y-%m-%dT%H:%M:%S%z")
                         is_active = (datetime.utcnow() - last_activity_dt).total_seconds() < 600  # 10 minutos
                     except (ValueError, TypeError) as ve:
                         print(f"Error al parsear last_activity para {user.get('username', 'Desconocido')}: {last_activity}, usando fallback")
