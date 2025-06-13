@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from google.cloud import vision
 import requests
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.responses import FileResponse
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -135,7 +136,7 @@ except Exception as e:
     print(f"Error al inicializar Google Cloud Vision: {str(e)}")
     raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
 
-# Nuevo endpoint para análisis de imágenes con IA (acepta archivos o URLs)
+# Nuevo endpoint para análisis de imágenes con IA (usa archivos o rutas internas)
 @app.post("/api/analyze_images")
 async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(None), image_urls: list[str] = None):
     try:
@@ -152,23 +153,26 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
         if image_urls and len(image_urls) > 2:
             raise HTTPException(status_code=400, detail="Se permiten máximo 2 URLs de imágenes")
 
-        # Usar la primera imagen disponible (archivo o URL)
+        # Usar la primera imagen disponible
         image_content = None
         if files and files[0]:
             image_content = await files[0].read()
             print(f"Procesando archivo: {files[0].filename}, tamaño: {len(image_content)} bytes")
         elif image_urls and image_urls[0]:
-            try:
-                headers = {'Authorization': f'Bearer {token}'}
-                response = requests.get(image_urls[0], headers=headers, timeout=10, stream=True)
-                if response.status_code != 200:
-                    print(f"Error al descargar URL: {response.status_code}, {response.text}")
-                    raise HTTPException(status_code=400, detail=f"URL de imagen no accesible: {response.status_code}")
-                image_content = response.content
-                print(f"Descargada URL: {image_urls[0]}, tamaño: {len(image_content)} bytes")
-            except requests.exceptions.RequestException as e:
-                print(f"Excepción al descargar URL: {str(e)}")
-                raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
+            # Extraer el ID del reporte de la URL (ej. /api/reports/684bbfa69ade18126b182499/image1)
+            import re
+            match = re.match(r'/api/reports/([^/]+)/image[12]', image_urls[0])
+            if match:
+                report_id = match.group(1)
+                image_path = f"/app/uploads/{report_id}_image1.jpg"  # Ajusta la ruta según tu almacenamiento
+                if os.path.exists(image_path):
+                    with open(image_path, 'rb') as f:
+                        image_content = f.read()
+                    print(f"Procesando imagen local: {image_path}, tamaño: {len(image_content)} bytes")
+                else:
+                    raise HTTPException(status_code=404, detail=f"Imagen no encontrada en {image_path}")
+            else:
+                raise HTTPException(status_code=400, detail="URL de imagen no válida")
 
         if not image_content:
             raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
