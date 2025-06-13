@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from app.routes import auth, reports, admin
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
@@ -8,6 +9,7 @@ import base64
 import json
 import time
 import secrets
+import uuid
 from typing import List, Optional
 from pydantic import BaseModel
 from google.cloud import vision
@@ -19,6 +21,9 @@ app = FastAPI(
     description="API para gestionar reportes de monitoreo estructural con autenticación de usuarios e IA básica.",
     version="1.0.0"
 )
+
+# Definir la URL base de la aplicación
+BASE_URL = "https://sistema-monitoreo-backend-2d6d5d68221a.herokuapp.com"
 
 # Configuración de OAuth2 para autenticación
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -215,7 +220,7 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
         evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
 
-        # Actualizar el reporte con los resultados de IA (sin guardar imágenes localmente)
+        # Actualizar el reporte con los resultados de IA
         updated_report = report.dict()
         updated_report["evaluation"] = evaluation
         updated_report["has_crack"] = has_crack
@@ -248,26 +253,6 @@ async def update_report(report_id: str, update_data: dict, token: str = Depends(
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al actualizar el reporte: {str(e)}")
-
-# Endpoint para servir imágenes (si están almacenadas externamente o simuladas)
-@app.get("/api/reports/{report_id}/image{image_num}")
-async def get_image(report_id: str, image_num: int, token: str = Depends(oauth2_scheme)):
-    try:
-        decoded_token = firebase_auth.verify_id_token(token)
-        uid = decoded_token['uid']
-        print(f"Usuario autenticado: {uid} solicitando imagen {image_num} para reporte {report_id}")
-
-        # Simulación: las imágenes no se guardan localmente, pero se sirven si existen
-        # En producción, usa una URL externa (ej. Cloudinary)
-        image_path = f"/app/uploads/{report_id}_image{image_num}.jpg"  # Esto es solo un placeholder
-        if os.path.exists(image_path):
-            return FileResponse(image_path, media_type="image/jpeg")
-        else:
-            raise HTTPException(status_code=404, detail="Imagen no encontrada")
-    except firebase_auth.InvalidIdTokenError:
-        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al servir la imagen: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
