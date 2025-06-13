@@ -164,13 +164,11 @@ async def delete_user(username: str, current_user: dict = Depends(get_current_ad
 async def assign_report(assignment: ReportAssign, current_user: dict = Depends(get_current_admin_user)):
     try:
         print(f"Intentando asignar reporte {assignment.report_id} al supervisor {assignment.supervisor_username}")
-        # Verificar si el reporte existe
         report = await reports_collection.find_one({"_id": ObjectId(assignment.report_id)})
         if not report:
             print(f"Reporte no encontrado: {assignment.report_id}")
             raise HTTPException(status_code=404, detail="Reporte no encontrado")
 
-        # Verificar si el supervisor existe y tiene el rol correcto
         supervisor = await users_collection.find_one({"username": assignment.supervisor_username})
         if not supervisor:
             print(f"Supervisor no encontrado: {assignment.supervisor_username}")
@@ -179,11 +177,9 @@ async def assign_report(assignment: ReportAssign, current_user: dict = Depends(g
             print(f"El usuario {assignment.supervisor_username} no es un supervisor (rol: {supervisor['role']})")
             raise HTTPException(status_code=400, detail="El usuario no es un supervisor")
 
-        # Usar el email del supervisor en lugar del username
         supervisor_email = supervisor["email"]
         print(f"Asignando reporte {assignment.report_id} al email del supervisor: {supervisor_email}")
 
-        # Asignar el reporte al supervisor usando el email
         await reports_collection.update_one(
             {"_id": ObjectId(assignment.report_id)},
             {"$set": {"assigned_supervisor": supervisor_email}}
