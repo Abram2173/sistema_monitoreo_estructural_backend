@@ -192,6 +192,7 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         for file in files:
             print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
 
+        # En producción, guarda en MongoDB o una base de datos
         return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack}
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
