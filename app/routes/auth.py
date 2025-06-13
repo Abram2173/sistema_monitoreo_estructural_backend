@@ -5,11 +5,12 @@ from firebase_admin import auth
 import os
 from cachetools import TTLCache
 from firebase_admin import firestore
+from pymongo.errors import ServerSelectionTimeoutError
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 cache = TTLCache(maxsize=100, ttl=300)
-db = firestore.client()  # Inicializar Firestore para actualizar estados
+db = firestore.client()
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
@@ -31,8 +32,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         role = custom_claims.get("role", "user")  # Default a 'user' si no hay rol
         print(f"Custom claims obtenidos del token: {custom_claims}, rol: {role}")
 
-        # Buscar usuario en MongoDB como respaldo
-        user = await users_collection.find_one({"email": email})
+        # Consultar MongoDB con timeout más bajo para evitar bloqueos
+        user = None
+        try:
+            user = await users_collection.find_one({"email": email}, serverSelectionTimeoutMS=5000)
+        except ServerSelectionTimeoutError:
+            print(f"Timeout al consultar MongoDB para {email}, usando solo custom claims")
+            user = None
+
         if not user:
             print(f"Usuario no encontrado en MongoDB, creando uno nuevo para {email}")
             username = email.split("@")[0]
@@ -42,21 +49,28 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
                 "role": role,  # Usar el rol del custom claim
                 "name": username.capitalize()
             }
-            await users_collection.insert_one(new_user)
+            try:
+                await users_collection.insert_one(new_user)
+            except Exception as e:
+                print(f"Error al insertar usuario en MongoDB: {str(e)}")
             user = new_user
         else:
             print(f"Usuario encontrado en MongoDB: {user}")
             # Actualizar rol en MongoDB si difiere del custom claim
             if user.get("role") != role:
                 print(f"Actualizando rol en MongoDB para {email} de {user['role']} a {role}")
-                await users_collection.update_one(
-                    {"email": email},
-                    {"$set": {"role": role}}
-                )
-                user["role"] = role
+                try:
+                    await users_collection.update_one(
+                        {"email": email},
+                        {"$set": {"role": role}}
+                    )
+                    user["role"] = role
+                except Exception as e:
+                    print(f"Error al actualizar rol en MongoDB: {str(e)}")
 
         # Actualizar estado en Firestore
-        user_ref = db.collection('users').document(decoded_token['uid'])
+        uid = decoded_token['uid']
+        user_ref = db.collection('users').document(uid)
         user_ref.set({'email': email, 'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
 
         user_data = {"username": user["username"], "role": role}
