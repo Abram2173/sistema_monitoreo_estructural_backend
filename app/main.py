@@ -1,10 +1,11 @@
 # app/main.py
 import firebase_admin
-from firebase_admin import credentials, firestore  # Importar firestore explícitamente
+from firebase_admin import credentials, firestore
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
 from app.config.firebase_init import initialize_firebase
+from app.config.database import get_database
 import os
 import base64
 import json
@@ -138,15 +139,23 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except firebase_admin.auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
 
+# Dependency para obtener la base de datos MongoDB
+async def get_mongo_db():
+    async for database in get_database():
+        yield database
+
 # Endpoint para análisis de imágenes
 @app.post("/api/analyze_images")
-async def analyze_images(current_user=Depends(get_current_user), files: list[UploadFile] = File(None), image_urls: list[str] = None):
+async def analyze_images(current_user=Depends(get_current_user), files: list[UploadFile] = File(None), image_urls: list[str] = None, mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
     role = current_user["role"]
     print(f"Usuario autenticado: {uid}, rol: {role}")
 
     user_ref = db.collection('users').document(uid)
     user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
+
+    users_coll = mongo_db.get_collection("users")
+    await users_coll.update_one({"_id": uid}, {"$set": {"status": "active", "last_seen": firestore.SERVER_TIMESTAMP}}, upsert=True)
 
     if not files and not image_urls:
         raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
@@ -171,7 +180,7 @@ async def analyze_images(current_user=Depends(get_current_user), files: list[Upl
 
 # Endpoint para obtener estado de usuarios
 @app.get("/api/users/status")
-async def get_user_status(current_user=Depends(get_current_user)):
+async def get_user_status(current_user=Depends(get_current_user), mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
     role = current_user["role"]
     print(f"Usuario autenticado: {uid}, rol: {role}")
@@ -194,7 +203,7 @@ async def get_user_status(current_user=Depends(get_current_user)):
 
 # Endpoint para subir reportes
 @app.post("/api/reports")
-async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), current_user=Depends(get_current_user)):
+async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), current_user=Depends(get_current_user), mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
     role = current_user["role"]
     print(f"Usuario autenticado: {uid}, rol: {role}")
@@ -205,6 +214,10 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
     user_ref = db.collection('users').document(uid)
     user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
 
+    users_coll = mongo_db.get_collection("users")
+    await users_coll.update_one({"_id": uid}, {"$set": {"status": "active", "last_seen": firestore.SERVER_TIMESTAMP}}, upsert=True)
+
+    reports_coll = mongo_db.get_collection("reports")
     if len(files) != 2:
         raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
 
@@ -221,6 +234,7 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
     updated_report["id"] = str(uuid.uuid4())
     updated_report["inspector_id"] = uid
 
+    await reports_coll.insert_one(updated_report)
     print(f"Reporte recibido: {updated_report}")
     for file in files:
         print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
@@ -229,7 +243,7 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
 
 # Endpoint para actualizar reportes
 @app.put("/api/reports/{report_id}")
-async def update_report(report_id: str, update_data: dict, current_user=Depends(get_current_user)):
+async def update_report(report_id: str, update_data: dict, current_user=Depends(get_current_user), mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
     role = current_user["role"]
     print(f"Usuario autenticado: {uid}, rol: {role}")
@@ -239,6 +253,14 @@ async def update_report(report_id: str, update_data: dict, current_user=Depends(
 
     user_ref = db.collection('users').document(uid)
     user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
+
+    users_coll = mongo_db.get_collection("users")
+    await users_coll.update_one({"_id": uid}, {"$set": {"status": "active", "last_seen": firestore.SERVER_TIMESTAMP}}, upsert=True)
+
+    reports_coll = mongo_db.get_collection("reports")
+    result = await reports_coll.update_one({"id": report_id}, {"$set": update_data})
+    if result.modified_count == 0 and result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Reporte no encontrado")
 
     print(f"Reporte {report_id} actualizado con: {update_data}")
     return {"success": True, "message": "Reporte actualizado exitosamente"}

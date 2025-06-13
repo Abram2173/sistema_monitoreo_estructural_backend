@@ -17,7 +17,13 @@ def get_db():
     from app.main import db  # Importación diferida para evitar circularidad
     return db
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_db)):
+# Dependency para obtener la base de datos MongoDB
+async def get_mongo_db():
+    from app.config.database import get_database
+    async for database in get_database():
+        yield database
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_db), mongo_db=Depends(get_mongo_db)):
     try:
         # Invalidar el caché para este token al iniciar una nueva sesión
         if token in cache:
@@ -37,35 +43,37 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
         role = custom_claims.get("role", "user")  # Default a 'user' si no hay rol
         print(f"Custom claims obtenidos del token: {custom_claims}, rol: {role}")
 
-        # Consultar MongoDB sin serverSelectionTimeoutMS si no es soportado
-        user = None
-        try:
-            user = await users_collection.find_one({"email": email})
-        except Exception as e:
-            print(f"Error al consultar MongoDB para {email}: {str(e)}, usando solo custom claims")
-            user = None
+        # Consultar MongoDB de forma asíncrona
+        users_coll = mongo_db.get_collection("users")
+        user = await users_coll.find_one({"email": email})
 
         if not user:
-            print(f"Usuario no encontrado en MongoDB, creando uno nuevo para {email}")
-            username = email.split("@")[0]
-            new_user = {
-                "username": username,
-                "email": email,
-                "role": role,
-                "name": username.capitalize()
-            }
-            try:
-                await users_collection.insert_one(new_user)
-            except Exception as e:
-                print(f"Error al insertar usuario en MongoDB: {str(e)}")
-            user = new_user
+            print(f"Usuario no encontrado en MongoDB, verificando duplicados para {email}")
+            existing_user = await users_coll.find_one({"email": email})
+            if not existing_user:
+                username = email.split("@")[0]
+                new_user = {
+                    "username": username,
+                    "email": email,
+                    "role": role,
+                    "name": username.capitalize()
+                }
+                try:
+                    await users_coll.insert_one(new_user)
+                    print(f"Usuario creado: {new_user}")
+                except Exception as e:
+                    print(f"Error al insertar usuario en MongoDB: {str(e)}")
+                user = new_user
+            else:
+                print(f"Usuario ya existe en MongoDB: {existing_user}")
+                user = existing_user
         else:
             print(f"Usuario encontrado en MongoDB: {user}")
             # Actualizar rol en MongoDB solo si difiere del custom claim
             if user.get("role") != role:
                 print(f"Actualizando rol en MongoDB para {email} de {user['role']} a {role}")
                 try:
-                    await users_collection.update_one(
+                    await users_coll.update_one(
                         {"email": email},
                         {"$set": {"role": role}}
                     )
@@ -95,7 +103,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 @router.post("/logout")
-async def logout(token: str = Depends(oauth2_scheme), db=Depends(get_db)):
+async def logout(token: str = Depends(oauth2_scheme), db=Depends(get_db), mongo_db=Depends(get_mongo_db)):
     try:
         if token in cache:
             del cache[token]
@@ -104,6 +112,9 @@ async def logout(token: str = Depends(oauth2_scheme), db=Depends(get_db)):
         uid = decoded_token['uid']
         user_ref = db.collection('users').document(uid)
         user_ref.set({'status': 'inactive', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
+
+        users_coll = mongo_db.get_collection("users")
+        await users_coll.update_one({"_id": uid}, {"$set": {"status": "inactive", "last_seen": firestore.SERVER_TIMESTAMP}}, upsert=True)
         return {"message": "Sesión cerrada exitosamente"}
     except auth.InvalidIdTokenError as e:
         print(f"Error al verificar el token en logout: {str(e)}")
