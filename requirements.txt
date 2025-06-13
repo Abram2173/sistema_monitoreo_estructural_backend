@@ -62,3 +62,4 @@ typing_extensions==4.13.2
 uritemplate==4.1.1
 urllib3==2.4.0
 uvicorn==0.30.6
+python-dateutil
