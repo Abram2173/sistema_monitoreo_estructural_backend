@@ -4,7 +4,7 @@ from app.config.database import users_collection
 from firebase_admin import auth
 import os
 from cachetools import TTLCache
-from datetime import datetime  # Añadimos esta importación
+from datetime import datetime
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -12,7 +12,6 @@ cache = TTLCache(maxsize=100, ttl=300)
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
-        # Invalidar el caché para este token al iniciar una nueva sesión
         if token in cache:
             print(f"Invalidando caché para el token: {token}")
             del cache[token]
@@ -43,7 +42,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
                 "email": email,
                 "role": role,
                 "name": username.capitalize(),
-                "last_activity": datetime.utcnow().isoformat() + "+00:00"  # Inicializar al crear
+                "last_activity": datetime.utcnow().isoformat() + "+00:00"
             }
             await users_collection.insert_one(new_user)
             user = new_user
