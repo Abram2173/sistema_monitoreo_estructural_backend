@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
 import firebase_admin
@@ -8,9 +8,8 @@ import base64
 import json
 import time
 import secrets
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel
-from google.cloud import vision
 from fastapi.security import OAuth2PasswordBearer
 
 app = FastAPI(
@@ -19,10 +18,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configuración de OAuth2 para autenticación
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
-# Middleware para medir el tiempo de las solicitudes
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
@@ -34,7 +31,6 @@ async def add_process_time_header(request: Request, call_next):
 
 print("Iniciando la aplicación...")
 
-# Inicializar Firebase Admin SDK
 firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
 if not firebase_admin._apps:
     if not firebase_credentials:
@@ -56,7 +52,6 @@ if not firebase_admin._apps:
         print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
         raise Exception(f"Error al inicializar Firebase Admin SDK: {str(e)}")
 
-# Configurar CORS para permitir solicitudes desde el frontend
 origins = [
     "http://localhost:3000",
     "https://eclectic-frangipane-39ee69.netlify.app",
@@ -72,17 +67,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Modelo para los datos de reporte
-class ReportRequest(BaseModel):
-    location: str
-    description: str
-    measurements: dict
-    risk_level: str
-    comments: Optional[str] = None
-    evaluation: Optional[str] = None
-    has_crack: Optional[bool] = None
+class UserInfo(BaseModel):
+    role: str
 
-# Función para asegurar que el administrador exista en Firebase Authentication
+@app.get("/api/auth/me", response_model=UserInfo)
+async def get_user_info(token: str = Depends(oauth2_scheme)):
+    try:
+        decoded_token = firebase_auth.verify_id_token(token)
+        uid = decoded_token['uid']
+        role = decoded_token.get('role', 'user')  # Asume 'user' si no hay rol
+        return {"role": role}
+    except firebase_auth.InvalidIdTokenError:
+        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
+
 def ensure_admin_user():
     try:
         print("Verificando si existe admin@example.com...")
@@ -91,7 +88,7 @@ def ensure_admin_user():
     except firebase_auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
-        print(f"Contraseña generada para admin: {admin_password}")  # Quitar en producción
+        print(f"Contraseña generada para admin: {admin_password}")
         firebase_auth.create_user(
             email="admin@example.com",
             password=admin_password,
@@ -108,19 +105,16 @@ async def startup_event():
     ensure_admin_user()
     print("Evento de startup completado")
 
-# Incluir las rutas de los diferentes módulos
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(reports.router, prefix="/api", tags=["Reportes"])
 app.include_router(admin.router, prefix="/api", tags=["Administración"])
 
-# Inicializar cliente de Google Cloud Vision con verificación
 google_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 if not google_credentials:
     print("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
     raise Exception("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
 try:
-    # Si es base64, decodificar; si es ruta, usar directamente
-    if google_credentials.startswith("ew"):  # Suponiendo base64
+    if google_credentials.startswith("ew"):
         decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')
         cred_data = json.loads(decoded_credentials)
         with open("temp_credentials.json", "w") as f:
@@ -134,11 +128,9 @@ except Exception as e:
     print(f"Error al inicializar Google Cloud Vision: {str(e)}")
     raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
 
-# Nuevo endpoint para análisis de imágenes con IA
 @app.post("/api/analyze_images")
 async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(...)):
     try:
-        # Verificar el token de autenticación con Firebase
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid}")
@@ -146,13 +138,10 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
         if len(files) != 2:
             raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
 
-        # Analizar la primera imagen con Google Cloud Vision
         image_content = await files[0].read()
         image = vision.Image(content=image_content)
         response = client.label_detection(image=image)
         labels = [label.description.lower() for label in response.label_annotations]
-
-        # Detectar riesgos (grietas, daños, deformaciones)
         has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
         evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
 
@@ -162,11 +151,9 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al analizar imágenes: {str(e)}")
 
-# Nuevo endpoint para subir reportes (almacena resultados de IA)
 @app.post("/api/reports")
 async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), token: str = Depends(oauth2_scheme)):
     try:
-        # Verificar el token de autenticación
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid}")
@@ -174,7 +161,6 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         if len(files) != 2:
             raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
 
-        # Analizar imágenes antes de guardar el reporte
         image_content = await files[0].read()
         image = vision.Image(content=image_content)
         response = client.label_detection(image=image)
@@ -182,17 +168,14 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
         evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
 
-        # Actualizar el reporte con los resultados de IA
         updated_report = report.dict()
         updated_report["evaluation"] = evaluation
         updated_report["has_crack"] = has_crack
 
-        # Simulación de almacenamiento (en producción, guarda en MongoDB)
         print(f"Reporte recibido: {updated_report}")
         for file in files:
             print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
 
-        # En producción, guarda en MongoDB o una base de datos
         return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack}
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
@@ -201,5 +184,5 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Usa el puerto de Heroku o 8000 por defecto
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
