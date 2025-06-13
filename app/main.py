@@ -28,13 +28,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Definir la URL base de la aplicación
 BASE_URL = "https://sistema-monitoreo-backend-2d6d5d68221a.herokuapp.com"
 
-# Configuración de OAuth2 para autenticación
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://127.0.0.1:8000/api/auth/login")
 
-# Middleware para medir el tiempo de las solicitudes
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
@@ -46,7 +43,6 @@ async def add_process_time_header(request: Request, call_next):
 
 print("Iniciando la aplicación...")
 
-# Configurar CORS para permitir solicitudes desde el frontend
 origins = [
     "http://localhost:3000",
     "https://eclectic-frangipane-39ee69.netlify.app",
@@ -62,7 +58,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Modelo para los datos de reporte
 class ReportRequest(BaseModel):
     location: str
     description: str
@@ -72,7 +67,6 @@ class ReportRequest(BaseModel):
     evaluation: Optional[str] = None
     has_crack: Optional[bool] = None
 
-# Función para asegurar que el administrador exista en Firebase Authentication
 def ensure_admin_user():
     try:
         print("Verificando si existe admin@example.com...")
@@ -85,7 +79,7 @@ def ensure_admin_user():
     except firebase_admin.auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
-        print(f"Contraseña generada para admin: {admin_password}")  # Quitar en producción
+        print(f"Contraseña generada para admin: {admin_password}")
         user = firebase_admin.auth.create_user(
             email="admin@example.com",
             password=admin_password,
@@ -103,32 +97,37 @@ async def startup_event():
     ensure_admin_user()
     print("Evento de startup completado")
 
-# Incluir las rutas de los diferentes módulos
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(reports.router, prefix="/api", tags=["Reportes"])
 app.include_router(admin.router, prefix="/api", tags=["Administración"])
 
-# Inicializar cliente de Google Cloud Vision con verificación
+# Inicializar cliente de Google Cloud Vision
 google_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if not google_credentials:
-    print("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
-    raise Exception("GOOGLE_APPLICATION_CREDENTIALS no está configurado")
-try:
-    if google_credentials.startswith("ew"):  # Suponiendo base64
-        decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')
-        cred_data = json.loads(decoded_credentials)
-        with open("temp_credentials.json", "w") as f:
-            json.dump(cred_data, f)
-        client = vision.ImageAnnotatorClient.from_service_account_json("temp_credentials.json")
-        os.remove("temp_credentials.json")
+if google_credentials:
+    try:
+        if google_credentials.startswith("ew"):  # Suponiendo base64
+            decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')
+            cred_data = json.loads(decoded_credentials)
+            with open("temp_credentials.json", "w") as f:
+                json.dump(cred_data, f)
+            client = vision.ImageAnnotatorClient.from_service_account_json("temp_credentials.json")
+            os.remove("temp_credentials.json")
+        else:
+            client = vision.ImageAnnotatorClient.from_service_account_json(google_credentials)
+        print("Google Cloud Vision inicializado correctamente")
+    except Exception as e:
+        print(f"Error al inicializar Google Cloud Vision: {str(e)}")
+        raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
+else:
+    # Usar el archivo local si está disponible
+    local_credentials_path = "/home/abram/web/sistema_monitoreo_estructural/google-vision-credentials.json"
+    if os.path.exists(local_credentials_path):
+        client = vision.ImageAnnotatorClient.from_service_account_json(local_credentials_path)
+        print("Google Cloud Vision inicializado con credenciales locales")
     else:
-        client = vision.ImageAnnotatorClient.from_service_account_json(google_credentials)
-    print("Google Cloud Vision inicializado correctamente")
-except Exception as e:
-    print(f"Error al inicializar Google Cloud Vision: {str(e)}")
-    raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
+        client = None
+        print("GOOGLE_APPLICATION_CREDENTIALS no está configurado y no se encontró google-vision-credentials.json localmente. Google Cloud Vision no estará disponible.")
 
-# Dependency para obtener el rol del usuario
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         decoded_token = firebase_admin.auth.verify_id_token(token)
@@ -139,12 +138,10 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except firebase_admin.auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
 
-# Dependency para obtener la base de datos MongoDB
 async def get_mongo_db():
     async for database in get_database():
         yield database
 
-# Endpoint para análisis de imágenes
 @app.post("/api/analyze_images")
 async def analyze_images(current_user=Depends(get_current_user), files: list[UploadFile] = File(None), image_urls: list[str] = None, mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
@@ -175,10 +172,19 @@ async def analyze_images(current_user=Depends(get_current_user), files: list[Upl
     if not image_content:
         raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
 
-    result = analyze_image(image_content)
+    if client:  # Solo procesar si el cliente de Vision está inicializado
+        image = vision.Image(content=image_content)
+        response = client.label_detection(image=image)
+        labels = [label.description.lower() for label in response.label_annotations]
+        has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
+        evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
+    else:
+        evaluation = "Análisis no disponible (Google Cloud Vision no configurado)"
+        has_crack = False
+
+    result = {"evaluation": evaluation, "has_crack": has_crack}
     return result
 
-# Endpoint para obtener estado de usuarios
 @app.get("/api/users/status")
 async def get_user_status(current_user=Depends(get_current_user), mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
@@ -201,7 +207,6 @@ async def get_user_status(current_user=Depends(get_current_user), mongo_db=Depen
         })
     return status_list or []
 
-# Endpoint para subir reportes
 @app.post("/api/reports")
 async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), current_user=Depends(get_current_user), mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
@@ -222,11 +227,15 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
 
     image_content = await files[0].read()
-    image = vision.Image(content=image_content)
-    response = client.label_detection(image=image)
-    labels = [label.description.lower() for label in response.label_annotations]
-    has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
-    evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
+    if client:  # Solo procesar si el cliente de Vision está inicializado
+        image = vision.Image(content=image_content)
+        response = client.label_detection(image=image)
+        labels = [label.description.lower() for label in response.label_annotations]
+        has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
+        evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
+    else:
+        evaluation = "Análisis no disponible (Google Cloud Vision no configurado)"
+        has_crack = False
 
     updated_report = report.dict()
     updated_report["evaluation"] = evaluation
@@ -241,7 +250,6 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
 
     return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack, "id": updated_report["id"]}
 
-# Endpoint para actualizar reportes
 @app.put("/api/reports/{report_id}")
 async def update_report(report_id: str, update_data: dict, current_user=Depends(get_current_user), mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
@@ -267,5 +275,5 @@ async def update_report(report_id: str, update_data: dict, current_user=Depends(
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Usa el puerto de Heroku o 8000 por defecto
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)

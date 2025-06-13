@@ -1,6 +1,6 @@
 # app/routes/auth.py
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from app.config.database import users_collection
 from firebase_admin import auth
 from cachetools import TTLCache
@@ -9,7 +9,8 @@ import firebase_admin
 from firebase_admin import firestore
 
 router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# Definir el endpoint donde se obtendrá el token
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://127.0.0.1:8000/api/auth/login")  # Ajusta la URL para local
 cache = TTLCache(maxsize=100, ttl=300)
 
 # Función para obtener la instancia de Firestore desde main.py
@@ -22,6 +23,18 @@ async def get_mongo_db():
     from app.config.database import get_database
     async for database in get_database():
         yield database
+
+@router.post("/login")
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    try:
+        # Autenticar con Firebase Authentication
+        user = auth.get_user_by_email(form_data.username)
+        # Generar un token personalizado
+        custom_token = auth.create_custom_token(user.uid)
+        # El frontend debe usar este token para obtener un ID token
+        return {"token": custom_token.decode('utf-8'), "message": "Login exitoso"}
+    except auth.AuthError as e:
+        raise HTTPException(status_code=401, detail=f"Credenciales inválidas: {str(e)}")
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_db), mongo_db=Depends(get_mongo_db)):
     try:
