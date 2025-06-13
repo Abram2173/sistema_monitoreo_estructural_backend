@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from app.routes import auth, reports, admin
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
@@ -15,7 +14,7 @@ from pydantic import BaseModel
 from google.cloud import vision
 import requests
 from fastapi.security import OAuth2PasswordBearer
-import tempfile
+from app.image_analyzer import analyze_image, get_image_content_from_url
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -141,7 +140,7 @@ except Exception as e:
     print(f"Error al inicializar Google Cloud Vision: {str(e)}")
     raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
 
-# Nuevo endpoint para análisis de imágenes con IA (usa archivos temporales)
+# Nuevo endpoint para análisis de imágenes con IA usando image_analyzer
 @app.post("/api/analyze_images")
 async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(None), image_urls: list[str] = None):
     try:
@@ -164,48 +163,17 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
             image_content = await files[0].read()
             print(f"Procesando archivo: {files[0].filename}, tamaño: {len(image_content)} bytes")
         elif image_urls and image_urls[0]:
-            try:
-                headers = {'Authorization': f'Bearer {token}'}
-                response = requests.get(f"{BASE_URL}{image_urls[0]}", headers=headers, timeout=10, stream=True)
-                if response.status_code != 200:
-                    print(f"Error al descargar URL: {response.status_code}, {response.text}")
-                    raise HTTPException(status_code=400, detail=f"URL de imagen no accesible: {response.status_code}")
-                # Guardar temporalmente la imagen
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        temp_file.write(chunk)
-                    temp_file_path = temp_file.name
-                with open(temp_file_path, 'rb') as f:
-                    image_content = f.read()
-                print(f"Descargada y guardada temporalmente: {temp_file_path}, tamaño: {len(image_content)} bytes")
-                # Eliminar el archivo temporal después de usarlo
-                os.unlink(temp_file_path)
-            except requests.exceptions.RequestException as e:
-                print(f"Excepción al descargar URL: {str(e)}")
-                raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
+            headers = {'Authorization': f'Bearer {token}'}
+            image_content = get_image_content_from_url(f"{BASE_URL}{image_urls[0]}", headers)
 
         if not image_content:
             raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
 
-        # Analizar la imagen con Google Cloud Vision
-        image = vision.Image(content=image_content)
-        try:
-            response = client.label_detection(image=image)
-            labels = [label.description.lower() for label in response.label_annotations]
-            print(f"Etiquetas detectadas: {labels}")
-        except Exception as e:
-            print(f"Error en label_detection: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error al procesar la imagen con Vision API: {str(e)}")
-
-        # Detectar riesgos (grietas, daños, deformaciones)
-        has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
-        evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
-
-        return {"evaluation": evaluation, "has_crack": has_crack}
+        # Analizar la imagen con el módulo separado
+        result = analyze_image(image_content)
+        return result
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al analizar imágenes: {str(e)}")
 
