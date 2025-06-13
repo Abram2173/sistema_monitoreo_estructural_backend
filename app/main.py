@@ -189,9 +189,7 @@ async def analyze_images(current_user=Depends(get_current_user), files: list[Upl
 async def get_user_status(current_user=Depends(get_current_user), mongo_db=Depends(get_mongo_db)):
     uid = current_user["uid"]
     role = current_user["role"]
-    print(f"Usuario autenticado: {uid}, rol: {role}")
-
-    if 'admin' not in (firebase_admin.auth.get_user(uid).custom_claims or {}):
+    if role != "admin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden ver el estado de usuarios")
 
     users_ref = db.collection('users')
