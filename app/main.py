@@ -104,8 +104,8 @@ def ensure_admin_user():
         if 'admin' not in (user.custom_claims or {}):
             firebase_auth.set_custom_user_claims(user.uid, {'admin': True})
             print("Asignado custom claim 'admin' al usuario")
-            # Actualizar el rol en la caché o base de datos local si usas MongoDB
-            # Esto depende de tu lógica en app.routes.auth
+            # Forzar refresco del token (esto debe manejarse en el frontend)
+            print("Nota: El usuario debe refrescar su token para aplicar el nuevo claim")
     except firebase_auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
@@ -240,6 +240,12 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid}")
 
+        # Obtener el rol del usuario desde el token o la base de datos
+        user = firebase_auth.get_user(uid)
+        role = user.custom_claims.get('role', 'user') if user.custom_claims else 'user'
+        if role != 'inspector' and role != 'admin':
+            raise HTTPException(status_code=403, detail="Solo inspectores pueden crear reportes")
+
         # Actualizar estado del usuario como activo
         user_ref = db.collection('users').document(uid)
         user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
@@ -260,6 +266,7 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         updated_report["evaluation"] = evaluation
         updated_report["has_crack"] = has_crack
         updated_report["id"] = str(uuid.uuid4())  # Generar ID único
+        updated_report["inspector_id"] = uid  # Añadir el UID del inspector
 
         # Simulación de almacenamiento (en producción, guarda en MongoDB)
         print(f"Reporte recibido: {updated_report}")
@@ -282,6 +289,12 @@ async def update_report(report_id: str, update_data: dict, token: str = Depends(
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid} actualizando reporte {report_id}")
+
+        # Obtener el rol del usuario desde el token o la base de datos
+        user = firebase_auth.get_user(uid)
+        role = user.custom_claims.get('role', 'user') if user.custom_claims else 'user'
+        if role != 'supervisor' and role != 'admin':
+            raise HTTPException(status_code=403, detail="Solo supervisores pueden actualizar reportes")
 
         # Actualizar estado del usuario como activo
         user_ref = db.collection('users').document(uid)
