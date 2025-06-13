@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
 import firebase_admin
@@ -8,8 +8,9 @@ import base64
 import json
 import time
 import secrets
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel
+from google.cloud import vision
 from fastapi.security import OAuth2PasswordBearer
 
 app = FastAPI(
@@ -31,6 +32,7 @@ async def add_process_time_header(request: Request, call_next):
 
 print("Iniciando la aplicación...")
 
+# Inicializar Firebase Admin SDK
 firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
 if not firebase_admin._apps:
     if not firebase_credentials:
@@ -52,6 +54,7 @@ if not firebase_admin._apps:
         print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
         raise Exception(f"Error al inicializar Firebase Admin SDK: {str(e)}")
 
+# Configurar CORS para permitir solicitudes desde el frontend
 origins = [
     "http://localhost:3000",
     "https://eclectic-frangipane-39ee69.netlify.app",
@@ -75,10 +78,19 @@ async def get_user_info(token: str = Depends(oauth2_scheme)):
     try:
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
-        role = decoded_token.get('role', 'user')  # Asume 'user' si no hay rol
+        role = decoded_token.get('role', 'user')  # Extrae el rol del token o usa 'user' por defecto
         return {"role": role}
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
+
+class ReportRequest(BaseModel):
+    location: str
+    description: str
+    measurements: dict
+    risk_level: str
+    comments: Optional[str] = None
+    evaluation: Optional[str] = None
+    has_crack: Optional[bool] = None
 
 def ensure_admin_user():
     try:
