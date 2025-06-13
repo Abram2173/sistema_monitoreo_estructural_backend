@@ -8,6 +8,7 @@ client = AsyncIOMotorClient(
     maxPoolSize=10,  # Tamaño máximo del pool de conexiones
     minPoolSize=1,   # Tamaño mínimo del pool de conexiones
     connectTimeoutMS=5000,  # Tiempo de espera para la conexión
+    serverSelectionTimeoutMS=5000  # Tiempo de espera para seleccionar un servidor
 )
 db = client["sistema_monitoreo"]
 
