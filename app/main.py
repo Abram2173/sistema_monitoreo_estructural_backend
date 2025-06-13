@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from app.routes import auth, reports, admin
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
@@ -14,9 +13,6 @@ from pydantic import BaseModel
 from google.cloud import vision
 import requests
 from fastapi.security import OAuth2PasswordBearer
-import uuid
-
-from create_report import BASE_URL  # Para generar nombres únicos de archivos
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -139,7 +135,7 @@ except Exception as e:
     print(f"Error al inicializar Google Cloud Vision: {str(e)}")
     raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
 
-# Nuevo endpoint para análisis de imágenes con IA (usa archivos o imágenes locales)
+# Nuevo endpoint para análisis de imágenes con IA (usa descarga de URLs)
 @app.post("/api/analyze_images")
 async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(None), image_urls: list[str] = None):
     try:
@@ -162,30 +158,17 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
             image_content = await files[0].read()
             print(f"Procesando archivo: {files[0].filename}, tamaño: {len(image_content)} bytes")
         elif image_urls and image_urls[0]:
-            # Extraer el ID del reporte de la URL (ej. /api/reports/684bbfa69ade18126b182499/image1)
-            import re
-            match = re.match(r'/api/reports/([^/]+)/image[12]', image_urls[0])
-            if match:
-                report_id = match.group(1)
-                # Intentar usar la imagen desde el almacenamiento local
-                image_path = f"/app/uploads/{report_id}_image1.jpg"  # Ajusta según el nombre de archivo
-                if os.path.exists(image_path):
-                    with open(image_path, 'rb') as f:
-                        image_content = f.read()
-                    print(f"Procesando imagen local: {image_path}, tamaño: {len(image_content)} bytes")
-                else:
-                    # Si no está localmente, intentar descargar con autenticación
-                    try:
-                        headers = {'Authorization': f'Bearer {token}'}
-                        response = requests.get(f"{BASE_URL}{image_urls[0]}", headers=headers, timeout=10, stream=True)
-                        if response.status_code != 200:
-                            print(f"Error al descargar URL: {response.status_code}, {response.text}")
-                            raise HTTPException(status_code=400, detail=f"URL de imagen no accesible: {response.status_code}")
-                        image_content = response.content
-                        print(f"Descargada URL: {image_urls[0]}, tamaño: {len(image_content)} bytes")
-                    except requests.exceptions.RequestException as e:
-                        print(f"Excepción al descargar URL: {str(e)}")
-                        raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
+            try:
+                headers = {'Authorization': f'Bearer {token}'}
+                response = requests.get(f"{BASE_URL}{image_urls[0]}", headers=headers, timeout=10, stream=True)
+                if response.status_code != 200:
+                    print(f"Error al descargar URL: {response.status_code}, {response.text}")
+                    raise HTTPException(status_code=400, detail=f"URL de imagen no accesible: {response.status_code}")
+                image_content = response.content
+                print(f"Descargada URL: {image_urls[0]}, tamaño: {len(image_content)} bytes")
+            except requests.exceptions.RequestException as e:
+                print(f"Excepción al descargar URL: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
 
         if not image_content:
             raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
@@ -212,7 +195,7 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al analizar imágenes: {str(e)}")
 
-# Nuevo endpoint para subir reportes (almacena resultados de IA y guarda imágenes)
+# Nuevo endpoint para subir reportes (sin guardado local)
 @app.post("/api/reports")
 async def create_report(report: ReportRequest, files: list[UploadFile] = File(...), token: str = Depends(oauth2_scheme)):
     try:
@@ -224,62 +207,30 @@ async def create_report(report: ReportRequest, files: list[UploadFile] = File(..
         if len(files) != 2:
             raise HTTPException(status_code=400, detail="Se requieren exactamente 2 imágenes")
 
-        # Generar un ID único para el reporte
-        report_id = str(uuid.uuid4())
-
-        # Guardar las imágenes localmente
-        os.makedirs("/app/uploads", exist_ok=True)
-        image_path_1 = f"/app/uploads/{report_id}_image1.jpg"
-        image_path_2 = f"/app/uploads/{report_id}_image2.jpg"
-        with open(image_path_1, "wb") as f:
-            f.write(await files[0].read())
-        with open(image_path_2, "wb") as f:
-            f.write(await files[1].read())
-
         # Analizar la primera imagen con Google Cloud Vision
-        image_content = await files[0].read()  # Releer el archivo para el análisis
+        image_content = await files[0].read()
         image = vision.Image(content=image_content)
         response = client.label_detection(image=image)
         labels = [label.description.lower() for label in response.label_annotations]
         has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
         evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
 
-        # Actualizar el reporte con los resultados de IA y rutas de imágenes
+        # Actualizar el reporte con los resultados de IA (sin guardar imágenes localmente)
         updated_report = report.dict()
-        updated_report["id"] = report_id
         updated_report["evaluation"] = evaluation
         updated_report["has_crack"] = has_crack
-        updated_report["image_path_1"] = f"/api/reports/{report_id}/image1"
-        updated_report["image_path_2"] = f"/api/reports/{report_id}/image2"
+        updated_report["id"] = str(uuid.uuid4())  # Generar ID único
 
         # Simulación de almacenamiento (en producción, guarda en MongoDB)
         print(f"Reporte recibido: {updated_report}")
         for file in files:
             print(f"Imagen recibida: {file.filename}, tamaño: {file.size} bytes")
 
-        return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack, "id": report_id}
+        return {"success": True, "message": "Reporte creado exitosamente", "evaluation": evaluation, "has_crack": has_crack, "id": updated_report["id"]}
     except firebase_auth.InvalidIdTokenError:
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
-
-# Endpoint para servir imágenes
-@app.get("/api/reports/{report_id}/image{image_num}")
-async def get_image(report_id: str, image_num: int, token: str = Depends(oauth2_scheme)):
-    try:
-        decoded_token = firebase_auth.verify_id_token(token)
-        uid = decoded_token['uid']
-        print(f"Usuario autenticado: {uid} solicitando imagen {image_num} para reporte {report_id}")
-
-        image_path = f"/app/uploads/{report_id}_image{image_num}.jpg"
-        if os.path.exists(image_path):
-            return FileResponse(image_path, media_type="image/jpeg")
-        else:
-            raise HTTPException(status_code=404, detail="Imagen no encontrada")
-    except firebase_auth.InvalidIdTokenError:
-        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al servir la imagen: {str(e)}")
 
 # Endpoint para actualizar reportes (manejo de acciones del supervisor)
 @app.put("/api/reports/{report_id}")
@@ -297,6 +248,26 @@ async def update_report(report_id: str, update_data: dict, token: str = Depends(
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al actualizar el reporte: {str(e)}")
+
+# Endpoint para servir imágenes (si están almacenadas externamente o simuladas)
+@app.get("/api/reports/{report_id}/image{image_num}")
+async def get_image(report_id: str, image_num: int, token: str = Depends(oauth2_scheme)):
+    try:
+        decoded_token = firebase_auth.verify_id_token(token)
+        uid = decoded_token['uid']
+        print(f"Usuario autenticado: {uid} solicitando imagen {image_num} para reporte {report_id}")
+
+        # Simulación: las imágenes no se guardan localmente, pero se sirven si existen
+        # En producción, usa una URL externa (ej. Cloudinary)
+        image_path = f"/app/uploads/{report_id}_image{image_num}.jpg"  # Esto es solo un placeholder
+        if os.path.exists(image_path):
+            return FileResponse(image_path, media_type="image/jpeg")
+        else:
+            raise HTTPException(status_code=404, detail="Imagen no encontrada")
+    except firebase_auth.InvalidIdTokenError:
+        raise HTTPException(status_code=401, detail="Token de autenticación inválido")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al servir la imagen: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
