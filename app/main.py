@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from google.cloud import vision
 import requests
 from fastapi.security import OAuth2PasswordBearer
+import tempfile
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -140,7 +141,7 @@ except Exception as e:
     print(f"Error al inicializar Google Cloud Vision: {str(e)}")
     raise Exception(f"Error al inicializar Google Cloud Vision: {str(e)}")
 
-# Nuevo endpoint para análisis de imágenes con IA (usa descarga de URLs)
+# Nuevo endpoint para análisis de imágenes con IA (usa archivos temporales)
 @app.post("/api/analyze_images")
 async def analyze_images(token: str = Depends(oauth2_scheme), files: list[UploadFile] = File(None), image_urls: list[str] = None):
     try:
@@ -169,8 +170,16 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
                 if response.status_code != 200:
                     print(f"Error al descargar URL: {response.status_code}, {response.text}")
                     raise HTTPException(status_code=400, detail=f"URL de imagen no accesible: {response.status_code}")
-                image_content = response.content
-                print(f"Descargada URL: {image_urls[0]}, tamaño: {len(image_content)} bytes")
+                # Guardar temporalmente la imagen
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        temp_file.write(chunk)
+                    temp_file_path = temp_file.name
+                with open(temp_file_path, 'rb') as f:
+                    image_content = f.read()
+                print(f"Descargada y guardada temporalmente: {temp_file_path}, tamaño: {len(image_content)} bytes")
+                # Eliminar el archivo temporal después de usarlo
+                os.unlink(temp_file_path)
             except requests.exceptions.RequestException as e:
                 print(f"Excepción al descargar URL: {str(e)}")
                 raise HTTPException(status_code=400, detail=f"Error al descargar la URL: {str(e)}")
