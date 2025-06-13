@@ -1,4 +1,3 @@
-# app/routes/admin.py
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict
 from app.config.database import users_collection, reports_collection
@@ -59,25 +58,46 @@ async def get_supervisors(current_user: dict = Depends(get_current_admin_user)):
 
 @router.post("/admin/users", response_model=Dict)
 async def create_user(user: UserCreate, current_user: dict = Depends(get_current_admin_user)):
+    print(f"Intentando crear usuario: {user.email}, username: {user.username}, role: {user.role}")
     try:
-        existing_user = await users_collection.find_one({"$or": [{"username": user.username}, {"email": user.email}]})
+        print("Verificando si el usuario ya existe en MongoDB...")
+        existing_user = await users_collection.find_one({
+            "$or": [{"username": user.username}, {"email": user.email}]
+        })
         if existing_user:
+            print(f"Usuario ya existe: {existing_user}")
             raise HTTPException(status_code=400, detail="El username o email ya está en uso")
 
-        firebase_user = firebase_auth.create_user(
-            email=user.email,
-            password=user.password,
-            display_name=user.name
-        )
-        firebase_auth.set_custom_user_claims(firebase_user.uid, {"role": user.role})
+        print("Creando usuario en Firebase...")
+        try:
+            firebase_user = firebase_auth.create_user(
+                email=user.email,
+                password=user.password,
+                display_name=user.name
+            )
+            print(f"Usuario creado en Firebase con UID: {firebase_user.uid}")
+        except Exception as e:
+            print(f"Error al crear usuario en Firebase: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error al crear el usuario en Firebase: {str(e)}")
 
+        print("Configurando custom claim...")
+        try:
+            firebase_auth.set_custom_user_claims(firebase_user.uid, {"role": user.role})
+            print(f"Custom claim configurado: role={user.role}")
+        except Exception as e:
+            print(f"Error al configurar custom claim: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error al configurar custom claim: {str(e)}")
+
+        print("Guardando usuario en MongoDB...")
         user_dict = {
             "username": user.username,
             "email": user.email,
             "role": user.role,
             "name": user.name
         }
+        print(f"Datos a guardar: {user_dict}")
         await users_collection.insert_one(user_dict)
+        print("Usuario guardado en MongoDB exitosamente")
 
         return {
             "username": user.username,
@@ -86,13 +106,24 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             "name": user.name
         }
     except HTTPException as e:
-        if 'firebase_user' in locals():
+        print(f"HTTPException capturada: {str(e)}")
+        try:
             firebase_auth.delete_user(firebase_user.uid)
+            print(f"Usuario eliminado de Firebase: {firebase_user.uid}")
+        except:
+            print("No se pudo eliminar el usuario de Firebase")
+            pass
         raise e
     except Exception as e:
-        if 'firebase_user' in locals():
+        print(f"Excepción general capturada: {str(e)}")
+        try:
             firebase_auth.delete_user(firebase_user.uid)
+            print(f"Usuario eliminado de Firebase: {firebase_user.uid}")
+        except:
+            print("No se pudo eliminar el usuario de Firebase")
+            pass
         raise HTTPException(status_code=500, detail=f"Error al crear el usuario: {str(e)}")
+
 @router.delete("/admin/users/{username}")
 async def delete_user(username: str, current_user: dict = Depends(get_current_admin_user)):
     try:
@@ -132,11 +163,13 @@ async def delete_user(username: str, current_user: dict = Depends(get_current_ad
 async def assign_report(assignment: ReportAssign, current_user: dict = Depends(get_current_admin_user)):
     try:
         print(f"Intentando asignar reporte {assignment.report_id} al supervisor {assignment.supervisor_username}")
+        # Verificar si el reporte existe
         report = await reports_collection.find_one({"_id": ObjectId(assignment.report_id)})
         if not report:
             print(f"Reporte no encontrado: {assignment.report_id}")
             raise HTTPException(status_code=404, detail="Reporte no encontrado")
 
+        # Verificar si el supervisor existe y tiene el rol correcto
         supervisor = await users_collection.find_one({"username": assignment.supervisor_username})
         if not supervisor:
             print(f"Supervisor no encontrado: {assignment.supervisor_username}")
@@ -145,9 +178,11 @@ async def assign_report(assignment: ReportAssign, current_user: dict = Depends(g
             print(f"El usuario {assignment.supervisor_username} no es un supervisor (rol: {supervisor['role']})")
             raise HTTPException(status_code=400, detail="El usuario no es un supervisor")
 
+        # Usar el email del supervisor en lugar del username
         supervisor_email = supervisor["email"]
         print(f"Asignando reporte {assignment.report_id} al email del supervisor: {supervisor_email}")
 
+        # Asignar el reporte al supervisor usando el email
         await reports_collection.update_one(
             {"_id": ObjectId(assignment.report_id)},
             {"$set": {"assigned_supervisor": supervisor_email}}
