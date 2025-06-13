@@ -9,16 +9,13 @@ import firebase_admin
 from firebase_admin import firestore
 
 router = APIRouter()
-# Definir el endpoint donde se obtendrá el token
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="http://127.0.0.1:8000/api/auth/login")  # Ajusta la URL para local
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="https://sistema-monitoreo-backend-2d6d5d68221a.herokuapp.com/api/auth/login")
 cache = TTLCache(maxsize=100, ttl=300)
 
-# Función para obtener la instancia de Firestore desde main.py
 def get_db():
-    from app.main import db  # Importación diferida para evitar circularidad
+    from app.main import db
     return db
 
-# Dependency para obtener la base de datos MongoDB
 async def get_mongo_db():
     from app.config.database import get_database
     async for database in get_database():
@@ -27,22 +24,14 @@ async def get_mongo_db():
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
-        # Autenticar con Firebase Authentication
         user = auth.get_user_by_email(form_data.username)
-        # Generar un token personalizado
         custom_token = auth.create_custom_token(user.uid)
-        # El frontend debe usar este token para obtener un ID token
         return {"token": custom_token.decode('utf-8'), "message": "Login exitoso"}
     except auth.AuthError as e:
         raise HTTPException(status_code=401, detail=f"Credenciales inválidas: {str(e)}")
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_db), mongo_db=Depends(get_mongo_db)):
     try:
-        # Invalidar el caché para este token al iniciar una nueva sesión
-        if token in cache:
-            print(f"Invalidando caché para el token: {token}")
-            del cache[token]
-
         decoded_token = auth.verify_id_token(token)
         email = decoded_token.get("email")
         if not email:
@@ -51,12 +40,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
 
         print(f"Email extraído del token: {email}")
 
-        # Obtener custom claims como fuente primaria del rol
+        # Obtener rol desde los custom claims
         custom_claims = decoded_token.get("custom_claims", {})
-        role = custom_claims.get("role", "user")  # Default a 'user' si no hay rol
+        role = custom_claims.get("role", "user")  # Usar el rol del custom claim, no de MongoDB por defecto
         print(f"Custom claims obtenidos del token: {custom_claims}, rol: {role}")
 
-        # Consultar MongoDB de forma asíncrona
         users_coll = mongo_db.get_collection("users")
         user = await users_coll.find_one({"email": email})
 
@@ -68,7 +56,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
                 new_user = {
                     "username": username,
                     "email": email,
-                    "role": role,
+                    "role": role,  # Usar el rol del token
                     "name": username.capitalize()
                 }
                 try:
@@ -82,7 +70,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
                 user = existing_user
         else:
             print(f"Usuario encontrado en MongoDB: {user}")
-            # Actualizar rol en MongoDB solo si difiere del custom claim
             if user.get("role") != role:
                 print(f"Actualizando rol en MongoDB para {email} de {user['role']} a {role}")
                 try:
@@ -94,7 +81,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
                 except Exception as e:
                     print(f"Error al actualizar rol en MongoDB: {str(e)}")
 
-        # Actualizar estado en Firestore
         uid = decoded_token['uid']
         user_ref = db.collection('users').document(uid)
         user_ref.set({'email': email, 'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
