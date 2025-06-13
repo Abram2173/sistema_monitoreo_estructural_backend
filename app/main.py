@@ -1,8 +1,10 @@
+# app/main.py
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore  # Importar firestore explícitamente
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
+from app.config.firebase_init import initialize_firebase
 import os
 import base64
 import json
@@ -16,32 +18,8 @@ import requests
 from fastapi.security import OAuth2PasswordBearer
 from app.image_analyzer import analyze_image, get_image_content_from_url
 
-# Inicializar Firebase globalmente antes de cualquier otra cosa
-firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
-if not firebase_admin._apps:
-    if not firebase_credentials:
-        print("FIREBASE_CREDENTIALS no está configurado en las variables de entorno")
-        raise Exception("FIREBASE_CREDENTIALS no está configurado")
-    try:
-        print("Decodificando FIREBASE_CREDENTIALS...")
-        decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
-        print("FIREBASE_CREDENTIALS decodificado correctamente")
-        cred_data = json.loads(decoded_credentials)
-        required_fields = ["type", "project_id", "private_key_id", "private_key", "client_email", "client_id"]
-        if not all(field in cred_data for field in required_fields):
-            raise ValueError("Credenciales de Firebase incompletas o inválidas")
-        cred = credentials.Certificate(cred_data)
-        firebase_admin.initialize_app(cred, {
-            'projectId': cred_data['project_id'],
-            'storageBucket': f"{cred_data['project_id']}.appspot.com"
-        })
-        print("Firebase Admin SDK inicializado correctamente")
-    except Exception as e:
-        print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
-        raise Exception(f"Error al inicializar Firebase Admin SDK: {str(e)}")
-
-# Inicializar Firestore globalmente
-db = firestore.client()
+# Inicializar Firebase y Firestore globalmente
+db = initialize_firebase()
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -99,7 +77,6 @@ def ensure_admin_user():
         print("Verificando si existe admin@example.com...")
         user = firebase_admin.auth.get_user_by_email("admin@example.com")
         print("Usuario administrador ya existe:", user.email)
-        # Asegurarse de que el admin tenga el custom claim
         if 'admin' not in (user.custom_claims or {}):
             firebase_admin.auth.set_custom_user_claims(user.uid, {'admin': True, 'role': 'admin'})
             print("Asignado custom claim 'admin' y 'role: admin' al usuario")
@@ -134,7 +111,7 @@ app.include_router(admin.router, prefix="/api", tags=["Administración"])
 google_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 if not google_credentials:
     print("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
-    raise Exception("GOOGLE_APPLICATION_CREDENTIALS no está configurado en las variables de entorno")
+    raise Exception("GOOGLE_APPLICATION_CREDENTIALS no está configurado")
 try:
     if google_credentials.startswith("ew"):  # Suponiendo base64
         decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')

@@ -1,17 +1,23 @@
+# app/routes/auth.py
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from app.config.database import users_collection
 from firebase_admin import auth
-import os
 from cachetools import TTLCache
-from firebase_admin import firestore  # Importar solo para referencia, no inicialización
+from typing import Optional
+import firebase_admin
+from firebase_admin import firestore
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 cache = TTLCache(maxsize=100, ttl=300)
-db = firestore.client()  # Usar la instancia global inicializada en main.py
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+# Función para obtener la instancia de Firestore desde main.py
+def get_db():
+    from app.main import db  # Importación diferida para evitar circularidad
+    return db
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_db)):
     try:
         # Invalidar el caché para este token al iniciar una nueva sesión
         if token in cache:
@@ -89,7 +95,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 @router.post("/logout")
-async def logout(token: str = Depends(oauth2_scheme)):
+async def logout(token: str = Depends(oauth2_scheme), db=Depends(get_db)):
     try:
         if token in cache:
             del cache[token]
