@@ -1,11 +1,10 @@
+# app/dependencies/auth.py
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2AuthorizationCodeBearer
+from fastapi.security import OAuth2PasswordBearer
 from firebase_admin import auth as firebase_auth
 
-oauth2_scheme = OAuth2AuthorizationCodeBearer(
-    authorizationUrl="https://accounts.google.com/o/oauth2/auth",
-    tokenUrl="https://oauth2.googleapis.com/token",
-)
+# Usar OAuth2PasswordBearer con el endpoint de login
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="https://sistema-monitoreo-backend-2d6d5d68221a.herokuapp.com/api/auth/login")
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
@@ -23,7 +22,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         custom_claims = user.custom_claims or {}
         role = custom_claims.get("role", "user")
         print(f"Rol extraído para {email}: {role}")
-        return {"username": user.email, "role": role}
+        return {"username": email, "role": role}  # Usar email como username
     except Exception as e:
         print(f"Error al verificar el token: {str(e)}")
         raise HTTPException(

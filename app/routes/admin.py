@@ -1,3 +1,4 @@
+# app/routes/admin.py
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict
 from app.config.database import users_collection, reports_collection
