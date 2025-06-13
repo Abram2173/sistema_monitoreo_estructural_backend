@@ -149,6 +149,10 @@ async def analyze_images(token: str = Depends(oauth2_scheme), files: list[Upload
         uid = decoded_token['uid']
         print(f"Usuario autenticado: {uid}")
 
+        # Depuración: Imprimir los datos recibidos
+        print(f"Archivos recibidos: {files}")
+        print(f"URLs recibidas: {image_urls}")
+
         # Verificar si se enviaron archivos o URLs
         if not files and not image_urls:
             raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
