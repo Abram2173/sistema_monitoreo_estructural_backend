@@ -24,3 +24,14 @@
 [33maea2737[m Usar email del supervisor en assigned_supervisor para consistencia
 [33m2555930[m ajustamos el reporte y admin
 [33m263cdd4[m Añadir depuración para cuerpo de la solicitud en reports.py
+[33m4ccd736[m Añadir depuración y mejorar manejo de usuarios y reportes
+[33m2757d76[m Ajustar búsqueda de usuarios por email en admin.py y añadir depuración
+[33m8adc062[m Añadir modelo UserCreate y configurar custom claims automáticamente
+[33mb502353[m Añadir modelo UserCreate y configurar custom claims automáticamente
+[33maa22b92[m Añadir modelo UserCreate y configurar custom claims automáticamente
+[33m5ccdc42[m Configurar FIREBASE_CREDENTIALS localmente y verificar en Heroku
+[33mc02a118[m Agregar depuración para identificar error de inicio
+[33md72b914[m Asegurar CORS para Netlify
+[33m82f6b21[m Agregar administrador fijo admin@example.com con rol admin
+[33m76294c8[m Actualizar CORS para incluir la URL de Netlify
+[33mce8fbab[m Primer commit completo del backend - Sistema de Monitoreo Estructural
