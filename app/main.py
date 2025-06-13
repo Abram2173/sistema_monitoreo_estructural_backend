@@ -56,7 +56,10 @@ if not firebase_admin._apps:
         if not all(field in cred_data for field in required_fields):
             raise ValueError("Credenciales de Firebase incompletas o inválidas")
         cred = credentials.Certificate(cred_data)
-        firebase_admin.initialize_app(cred, {'storageBucket': 'your-project-id.appspot.com'})  # Ajusta el bucket
+        firebase_admin.initialize_app(cred, {
+            'projectId': cred_data['project_id'],
+            'storageBucket': f"{cred_data['project_id']}.appspot.com"
+        })
         print("Firebase Admin SDK inicializado correctamente")
     except Exception as e:
         print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
@@ -101,6 +104,8 @@ def ensure_admin_user():
         if 'admin' not in (user.custom_claims or {}):
             firebase_auth.set_custom_user_claims(user.uid, {'admin': True})
             print("Asignado custom claim 'admin' al usuario")
+            # Actualizar el rol en la caché o base de datos local si usas MongoDB
+            # Esto depende de tu lógica en app.routes.auth
     except firebase_auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
