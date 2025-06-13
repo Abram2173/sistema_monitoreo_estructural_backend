@@ -32,17 +32,17 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
 
         print(f"Email extraído del token: {email}")
 
-        # Obtener custom claims como fuente principal del rol
+        # Obtener custom claims como fuente primaria del rol
         custom_claims = decoded_token.get("custom_claims", {})
         role = custom_claims.get("role", "user")  # Default a 'user' si no hay rol
         print(f"Custom claims obtenidos del token: {custom_claims}, rol: {role}")
 
-        # Consultar MongoDB con timeout más bajo para evitar bloqueos
+        # Consultar MongoDB sin serverSelectionTimeoutMS si no es soportado
         user = None
         try:
-            user = await users_collection.find_one({"email": email}, serverSelectionTimeoutMS=5000)
+            user = await users_collection.find_one({"email": email})
         except Exception as e:
-            print(f"Timeout o error al consultar MongoDB para {email}: {str(e)}, usando solo custom claims")
+            print(f"Error al consultar MongoDB para {email}: {str(e)}, usando solo custom claims")
             user = None
 
         if not user:
@@ -51,7 +51,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
             new_user = {
                 "username": username,
                 "email": email,
-                "role": role,  # Usar el rol del custom claim
+                "role": role,
                 "name": username.capitalize()
             }
             try:
@@ -61,7 +61,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_d
             user = new_user
         else:
             print(f"Usuario encontrado en MongoDB: {user}")
-            # Actualizar rol en MongoDB si difiere del custom claim
+            # Actualizar rol en MongoDB solo si difiere del custom claim
             if user.get("role") != role:
                 print(f"Actualizando rol en MongoDB para {email} de {user['role']} a {role}")
                 try:
