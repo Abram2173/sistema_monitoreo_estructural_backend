@@ -98,6 +98,13 @@ async def create_report(
 
         result = await reports_collection.insert_one(report_dict)
 
+        # Actualizar last_activity del usuario
+        await users_collection.update_one(
+            {"email": inspector_email},
+            {"$set": {"last_activity": datetime.utcnow()}}
+        )
+        print(f"last_activity actualizado para {inspector_email}")
+
         response_dict = report_dict.copy()
         response_dict["id"] = str(result.inserted_id)
         response_dict["recommendations"] = None
@@ -117,6 +124,7 @@ async def create_report(
         print(f"Error al crear el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
 
+# (Resto del código de reports.py permanece igual)
 @router.get("/reports", response_model=List[ReportOut])
 async def get_reports(
     current_user: dict = Depends(get_current_user_with_report_access)

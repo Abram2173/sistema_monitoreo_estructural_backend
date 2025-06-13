@@ -10,6 +10,9 @@ import time
 import secrets
 from typing import List, Optional
 from pydantic import BaseModel
+import asyncio
+from app.config.database import users_collection  # Importar la colección desde database.py
+from datetime import datetime  # Importar datetime
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -40,7 +43,6 @@ if not firebase_admin._apps:
         decoded_credentials = base64.b64decode(firebase_credentials).decode('utf-8')
         print("FIREBASE_CREDENTIALS decodificado correctamente")
         cred_data = json.loads(decoded_credentials)
-        # Validar campos esenciales de las credenciales
         required_fields = ["type", "project_id", "private_key_id", "private_key", "client_email", "client_id"]
         if not all(field in cred_data for field in required_fields):
             raise ValueError("Credenciales de Firebase incompletas o inválidas")
@@ -97,10 +99,25 @@ def ensure_admin_user():
         print(f"Error al verificar/crear administrador: {str(e)}")
         raise Exception(f"Error al verificar/crear administrador: {str(e)}")
 
+async def update_users_last_activity():
+    print("Iniciando actualización de last_activity para usuarios existentes...")
+    async for user in users_collection.find():
+        if "last_activity" not in user:
+            await users_collection.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"last_activity": datetime.utcnow()}}
+            )
+            print(f"Actualizado last_activity para {user['username']}")
+    print("Actualización completada.")
+
 @app.on_event("startup")
 async def startup_event():
     print("Ejecutando evento de startup...")
     ensure_admin_user()
+    # Ejecutar actualización solo si no se ha hecho antes (puedes usar una variable de entorno o archivo como bandera)
+    if os.getenv("INITIAL_UPDATE_DONE", "false") == "false":
+        await update_users_last_activity()
+        os.environ["INITIAL_UPDATE_DONE"] = "true"  # Marca como completado
     print("Evento de startup completado")
 
 # Incluir las rutas de los diferentes módulos

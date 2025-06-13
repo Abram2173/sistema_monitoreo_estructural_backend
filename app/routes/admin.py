@@ -6,6 +6,7 @@ from app.models.user import UserCreate
 from firebase_admin import auth as firebase_auth
 from pydantic import BaseModel
 from bson import ObjectId
+from datetime import datetime, timedelta
 
 router = APIRouter()
 
@@ -93,7 +94,8 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
             "username": user.username,
             "email": user.email,
             "role": user.role,
-            "name": user.name
+            "name": user.name,
+            "last_activity": datetime.utcnow()  # Inicializar last_activity al crear el usuario
         }
         print(f"Datos a guardar: {user_dict}")
         await users_collection.insert_one(user_dict)
@@ -189,7 +191,34 @@ async def assign_report(assignment: ReportAssign, current_user: dict = Depends(g
         )
         print(f"Reporte {assignment.report_id} asignado a {supervisor_email}")
 
+        # Actualizar last_activity del supervisor
+        await users_collection.update_one(
+            {"email": supervisor_email},
+            {"$set": {"last_activity": datetime.utcnow()}}
+        )
+        print(f"last_activity actualizado para {supervisor_email}")
+
         return {"message": f"Reporte {assignment.report_id} asignado a {supervisor_email}"}
     except Exception as e:
         print(f"Error al asignar el reporte: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al asignar el reporte: {str(e)}")
+
+@router.get("/users/status", response_model=List[Dict])
+async def get_users_status(current_user: dict = Depends(get_current_admin_user)):
+    try:
+        users_status = []
+        async for user in users_collection.find():
+            is_active = False
+            if user.get("last_activity"):
+                last_activity = datetime.fromisoformat(user["last_activity"])
+                is_active = (datetime.utcnow() - last_activity) < timedelta(minutes=5)
+            users_status.append({
+                "username": user.get("username"),
+                "role": user.get("role"),
+                "is_active": is_active
+            })
+        print(f"Estado de usuarios devuelto: {users_status}")
+        return users_status
+    except Exception as e:
+        print(f"Error al obtener el estado de los usuarios: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener el estado de los usuarios: {str(e)}")
