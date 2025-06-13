@@ -213,15 +213,16 @@ async def get_users_status(current_user: dict = Depends(get_current_admin_user))
             if last_activity is not None:
                 if isinstance(last_activity, str):
                     try:
-                        # Ajustar el formato si termina en 'Z' o no tiene zona horaria
+                        # Intentar parsear la cadena con manejo de zona horaria
                         last_activity_str = last_activity.replace("Z", "+00:00") if "Z" in last_activity else last_activity
                         last_activity_dt = datetime.fromisoformat(last_activity_str)
-                        is_active = (datetime.utcnow() - last_activity_dt) < timedelta(minutes=5)
+                        # Usar un umbral de 10 minutos para dar más margen
+                        is_active = (datetime.utcnow() - last_activity_dt).total_seconds() < 600  # 10 minutos en segundos
                     except (ValueError, TypeError) as ve:
                         print(f"Error al parsear last_activity para {user.get('username', 'Desconocido')}: {last_activity}, usando fallback")
-                        is_active = False  # Fallback si el formato falla
+                        is_active = False
                 elif isinstance(last_activity, datetime):
-                    is_active = (datetime.utcnow() - last_activity) < timedelta(minutes=5)
+                    is_active = (datetime.utcnow() - last_activity).total_seconds() < 600  # 10 minutos
                 else:
                     print(f"Tipo inesperado de last_activity para {user.get('username', 'Desconocido')}: {type(last_activity)}, usando fallback")
                     is_active = False
