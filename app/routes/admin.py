@@ -217,11 +217,14 @@ async def get_users_status(current_user: dict = Depends(get_current_admin_user))
                         last_activity_str = last_activity.replace("Z", "+00:00") if "Z" in last_activity else last_activity
                         last_activity_dt = datetime.fromisoformat(last_activity_str)
                         is_active = (datetime.utcnow() - last_activity_dt) < timedelta(minutes=5)
-                    except ValueError as ve:
-                        print(f"Formato inválido de last_activity para {user.get('username')}: {last_activity}, usando fallback")
+                    except (ValueError, TypeError) as ve:
+                        print(f"Error al parsear last_activity para {user.get('username', 'Desconocido')}: {last_activity}, usando fallback")
                         is_active = False  # Fallback si el formato falla
                 elif isinstance(last_activity, datetime):
                     is_active = (datetime.utcnow() - last_activity) < timedelta(minutes=5)
+                else:
+                    print(f"Tipo inesperado de last_activity para {user.get('username', 'Desconocido')}: {type(last_activity)}, usando fallback")
+                    is_active = False
             users_status.append({
                 "username": user.get("username", "Desconocido"),
                 "role": user.get("role", "Desconocido"),
