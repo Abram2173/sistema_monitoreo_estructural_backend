@@ -11,8 +11,8 @@ import secrets
 from typing import List, Optional
 from pydantic import BaseModel
 import asyncio
-from app.config.database import users_collection  # Importar la colección desde database.py
-from datetime import datetime  # Importar datetime
+from app.config.database import users_collection
+from datetime import datetime
 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
@@ -102,10 +102,10 @@ def ensure_admin_user():
 async def update_users_last_activity():
     print("Iniciando actualización de last_activity para usuarios existentes...")
     async for user in users_collection.find():
-        if "last_activity" not in user:
+        if "last_activity" not in user or not user["last_activity"]:
             await users_collection.update_one(
                 {"_id": user["_id"]},
-                {"$set": {"last_activity": datetime.utcnow()}}
+                {"$set": {"last_activity": datetime.utcnow().isoformat() + "+00:00"}}
             )
             print(f"Actualizado last_activity para {user['username']}")
     print("Actualización completada.")
@@ -114,7 +114,7 @@ async def update_users_last_activity():
 async def startup_event():
     print("Ejecutando evento de startup...")
     ensure_admin_user()
-    # Ejecutar actualización solo si no se ha hecho antes (puedes usar una variable de entorno o archivo como bandera)
+    # Ejecutar actualización solo si no se ha hecho antes
     if os.getenv("INITIAL_UPDATE_DONE", "false") == "false":
         await update_users_last_activity()
         os.environ["INITIAL_UPDATE_DONE"] = "true"  # Marca como completado
@@ -171,4 +171,4 @@ async def create_report(token: str, report: ReportRequest, files: List[UploadFil
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al crear el reporte: {str(e)}")
 
-print("Aplicación configurada correctamente, iniciando servidor...") 
+print("Aplicación configurada correctamente, iniciando servidor...")
