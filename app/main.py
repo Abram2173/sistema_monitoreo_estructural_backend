@@ -75,14 +75,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Modelo para los datos de usuario
-class UserRequest(BaseModel):
-    username: str
-    name: str
-    email: str
-    role: str
-    password: str
-
 # Modelo para los datos de reporte
 class ReportRequest(BaseModel):
     location: str
@@ -166,7 +158,7 @@ async def startup_event():
 # Incluir las rutas de los diferentes módulos
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(reports.router, prefix="/api", tags=["Reportes"])
-app.include_router(admin.router, prefix="/api/admin", tags=["Administración"])
+app.include_router(admin.router, prefix="/api", tags=["Administración"])
 
 # Endpoint para análisis de imágenes con IA
 @app.post("/api/analyze_images")
@@ -236,86 +228,6 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             user_ref = firestore.client().collection('users').document(uid)
             user_ref.set({'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
             await users_collection.update_one({"_id": uid}, {"$set": {"last_seen": datetime.utcnow().isoformat() + "+00:00"}}, upsert=True)
-
-# Endpoint para obtener usuarios (solo para administradores)
-@app.get("/api/admin/users")
-async def get_users(token: dict = Depends(get_current_user)):
-    try:
-        if token["role"] != "admin":
-            raise HTTPException(status_code=403, detail="Solo administradores pueden ver la lista de usuarios")
-        users = []
-        async for user in users_collection.find():
-            user_data = {
-                "username": user.get("username"),
-                "name": user.get("name"),
-                "email": user.get("email"),
-                "role": user.get("role")
-            }
-            users.append(user_data)
-        return users
-    except HTTPException as http_err:
-        raise http_err
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al obtener usuarios: {str(e)}")
-
-# Endpoint para eliminar usuario (solo para administradores)
-@app.delete("/api/admin/users/{username}")
-async def delete_user(username: str, token: dict = Depends(get_current_user)):
-    try:
-        if token["role"] != "admin":
-            raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar usuarios")
-        existing_user = await users_collection.find_one({"username": username})
-        if not existing_user:
-            raise HTTPException(status_code=404, detail="Usuario no encontrado")
-        # Eliminar usuario de Firebase Authentication
-        firebase_user = firebase_auth.get_user_by_email(existing_user["email"])
-        firebase_auth.delete_user(firebase_user.uid)
-        # Eliminar de MongoDB
-        await users_collection.delete_one({"username": username})
-        print(f"Usuario {username} eliminado exitosamente")
-        return {"message": f"Usuario {username} eliminado exitosamente"}
-    except firebase_auth.UserNotFoundError:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado en Firebase")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al eliminar usuario: {str(e)}")
-
-# Endpoint para crear usuario manualmente (solo para administradores)
-@app.post("/api/admin/users")
-async def create_user(token: dict = Depends(get_current_user), user: UserRequest = None):
-    try:
-        if token["role"] != "admin":
-            raise HTTPException(status_code=403, detail="Solo administradores pueden crear usuarios")
-        if not user:
-            raise HTTPException(status_code=400, detail="Se requieren datos del usuario")
-        # Verificar si el usuario ya existe
-        existing_user = await users_collection.find_one({"username": user.username})
-        if existing_user:
-            raise HTTPException(status_code=400, detail="El username ya está en uso")
-        existing_email = await users_collection.find_one({"email": user.email})
-        if existing_email:
-            raise HTTPException(status_code=400, detail="El email ya está en uso")
-        # Crear usuario en Firebase Authentication
-        new_user = firebase_auth.create_user(
-            email=user.email,
-            password=user.password,
-            display_name=user.name
-        )
-        # Asignar rol
-        firebase_auth.set_custom_user_claims(new_user.uid, {"role": user.role})
-        # Guardar en MongoDB
-        await users_collection.insert_one({
-            "username": user.username,
-            "name": user.name,
-            "email": user.email,
-            "role": user.role,
-            "last_activity": datetime.utcnow().isoformat() + "+00:00"
-        })
-        print(f"Usuario {user.username} creado exitosamente con email {user.email}")
-        return {"message": f"Usuario {user.username} creado exitosamente", "user": {"username": user.username, "name": user.name, "email": user.email, "role": user.role}}
-    except HTTPException as http_err:
-        raise http_err
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al crear usuario: {str(e)}")
 
 # Endpoint para obtener reportes
 @app.get("/api/reports")
