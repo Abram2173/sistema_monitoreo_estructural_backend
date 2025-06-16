@@ -9,12 +9,15 @@ import json
 import time
 import secrets
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel  # Importar BaseModel para definir ReportRequest
 import asyncio
 from app.config.database import users_collection
 from datetime import datetime
 import requests
-from google.cloud import vision
+from PIL import Image
+import io  # Importar io para manejar BytesIO
+import torch
+from transformers import AutoModelForImageClassification, AutoProcessor
 import uuid
 
 app = FastAPI(
@@ -57,26 +60,17 @@ if not firebase_admin._apps:
         print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
         raise Exception(f"Error al inicializar Firebase Admin SDK: {str(e)}")
 
-# Inicializar Google Cloud Vision con depuración
-client = None
-google_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if google_credentials:
-    try:
-        print("Intentando inicializar Google Cloud Vision con credenciales...")
-        if google_credentials.startswith("ew"):
-            decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')
-            cred_data = json.loads(decoded_credentials)
-            with open("temp_credentials.json", "w") as f:
-                json.dump(cred_data, f)
-            client = vision.ImageAnnotatorClient.from_service_account_json("temp_credentials.json")
-            os.remove("temp_credentials.json")
-        else:
-            client = vision.ImageAnnotatorClient.from_service_account_json(google_credentials)
-        print("Google Cloud Vision inicializado correctamente")
-    except Exception as e:
-        print(f"Error al inicializar Google Cloud Vision: {str(e)}. Usando simulación de IA.")
-else:
-    print("GOOGLE_APPLICATION_CREDENTIALS no está configurado o es inválido. Usando simulación de IA.")
+# Inicializar modelo de Hugging Face
+processor = None
+model = None
+try:
+    model_name = "google/vit-base-patch16-224"  # Modelo de clasificación de imágenes
+    processor = AutoProcessor.from_pretrained(model_name)
+    model = AutoModelForImageClassification.from_pretrained(model_name)
+    print("Modelo de Hugging Face inicializado correctamente")
+except Exception as e:
+    print(f"Error al inicializar el modelo de Hugging Face: {str(e)}. Usando simulación.")
+    model = None
 
 # Configurar CORS para permitir solicitudes desde el frontend
 origins = [
@@ -101,6 +95,11 @@ class ReportRequest(BaseModel):
     measurements: dict
     risk_level: str
     comments: Optional[str] = None
+
+# Modelo para los datos de análisis de imágenes
+class ImageAnalysisRequest(BaseModel):
+    image_urls: Optional[List[str]] = None
+    files: Optional[List[UploadFile]] = None
 
 # Dependencia para obtener el usuario autenticado
 async def get_current_user(authorization: str = Header(None)):
@@ -175,22 +174,23 @@ app.include_router(admin.router, prefix="/api", tags=["Administración"])
 
 # Endpoint para análisis de imágenes con IA
 @app.post("/api/analyze_images")
-async def analyze_images(token: dict = Depends(get_current_user), files: List[UploadFile] = File(None), image_urls: List[str] = None):
+async def analyze_images(token: dict = Depends(get_current_user), request_data: ImageAnalysisRequest = None):
     uid = token["uid"] if token else None
     try:
         print(f"Token recibido en /api/analyze_images: {token}")
+        print(f"Datos recibidos en /api/analyze_images: {request_data}")
         # Validar que se envíen datos
-        if not files and not image_urls:
+        if not request_data.files and not request_data.image_urls:
             raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
-        if (files and len(files) > 2) or (image_urls and len(image_urls) > 2):
+        if (request_data.files and len(request_data.files) > 2) or (request_data.image_urls and len(request_data.image_urls) > 2):
             raise HTTPException(status_code=400, detail="Se permiten máximo 2 imágenes o URLs")
 
         image_content = None
-        if files and files[0]:
-            image_content = await files[0].read()
-        elif image_urls and image_urls[0]:
+        if request_data.files and request_data.files[0]:
+            image_content = await request_data.files[0].read()
+        elif request_data.image_urls and request_data.image_urls[0]:
             try:
-                response = requests.get(image_urls[0], timeout=10, headers={'Authorization': f'Bearer {token["uid"]}' if token else ''})
+                response = requests.get(request_data.image_urls[0], timeout=10, headers={'Authorization': f'Bearer {token["uid"]}' if token else ''})
                 response.raise_for_status()
                 image_content = response.content
             except requests.RequestException as e:
@@ -199,18 +199,20 @@ async def analyze_images(token: dict = Depends(get_current_user), files: List[Up
         if not image_content:
             raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
 
-        # Análisis con Google Cloud Vision si está disponible
-        if client:
+        # Análisis con Hugging Face si el modelo está disponible
+        if model and processor:
             try:
-                image = vision.Image(content=image_content)
-                response = client.label_detection(image=image)
-                labels = [label.description.lower() for label in response.label_annotations]
-                has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
-                evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
+                image = Image.open(io.BytesIO(image_content))
+                inputs = processor(images=image, return_tensors="pt")
+                outputs = model(**inputs)
+                logits = outputs.logits
+                predicted_class_idx = logits.argmax(-1).item()
+                has_crack = "damage" in model.config.id2label[predicted_class_idx].lower()
+                evaluation = f"Análisis con Hugging Face: {model.config.id2label[predicted_class_idx]}"
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error al procesar la imagen con Google Cloud Vision: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error al procesar la imagen con Hugging Face: {str(e)}")
         else:
-            evaluation = "Simulación de IA: Análisis no disponible (Google Cloud Vision no configurado)"
+            evaluation = "Simulación de IA: Análisis no disponible (Hugging Face no configurado)"
             has_crack = False
 
         # Actualizar estado del usuario
