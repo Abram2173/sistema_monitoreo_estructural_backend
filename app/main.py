@@ -16,6 +16,7 @@ from datetime import datetime
 import requests
 from PIL import Image
 import numpy as np
+import io
 import uuid
 
 app = FastAPI(
@@ -180,6 +181,7 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
                 response = requests.get(request_data.image_urls[0], timeout=10)
                 response.raise_for_status()
                 image_content = response.content
+                print(f"Imagen descargada, tamaño: {len(image_content)} bytes")
             except requests.RequestException as e:
                 raise HTTPException(status_code=400, detail=f"Error al descargar la imagen desde URL: {str(e)}")
 
@@ -187,12 +189,18 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
 
         # Análisis básico con Pillow y numpy
-        image = Image.open(io.BytesIO(image_content))
-        image_array = np.array(image.convert('L'))  # Convertir a escala de grises
-        contrast = np.std(image_array)  # Desviación estándar como medida de contraste
-        has_crack = contrast > 50  # Umbral simple para detectar cambios abruptos
-        evaluation = "Análisis básico: " + ("posibles grietas o daños detectados" if has_crack else "ningún daño evidente detectado")
-        
+        try:
+            image = Image.open(io.BytesIO(image_content))
+            image_array = np.array(image.convert('L'))  # Convertir a escala de grises
+            print(f"Imagen convertida a escala de grises, forma: {image_array.shape}")
+            contrast = np.std(image_array)  # Desviación estándar como medida de contraste
+            print(f"Contraste calculado: {contrast}")
+            has_crack = contrast > 50  # Umbral simple para detectar cambios abruptos
+            evaluation = "Análisis básico: " + ("posibles grietas o daños detectados" if has_crack else "ningún daño evidente detectado")
+            print(f"Evaluación: {evaluation}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error al procesar la imagen: {str(e)}")
+
         # Actualizar el reporte con el resultado de la IA
         if request_data.image_urls and request_data.image_urls[0]:
             report_id = request_data.image_urls[0].split('/api/reports/')[1].split('/')[0]  # Extraer ID del reporte
@@ -263,6 +271,5 @@ async def create_report(token: dict = Depends(get_current_user), report: ReportR
 
 if __name__ == "__main__":
     import uvicorn
-    import io
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
