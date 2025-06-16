@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
 import firebase_admin
@@ -14,7 +14,8 @@ import asyncio
 from app.config.database import users_collection
 from datetime import datetime
 import requests
-from google.cloud import vision
+import cv2
+import numpy as np
 import uuid
 
 app = FastAPI(
@@ -57,26 +58,6 @@ if not firebase_admin._apps:
         print(f"Error al inicializar Firebase Admin SDK: {str(e)}")
         raise Exception(f"Error al inicializar Firebase Admin SDK: {str(e)}")
 
-# Inicializar Google Cloud Vision (opcional)
-client = None
-google_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if google_credentials:
-    try:
-        if google_credentials.startswith("ew"):
-            decoded_credentials = base64.b64decode(google_credentials).decode('utf-8')
-            cred_data = json.loads(decoded_credentials)
-            with open("temp_credentials.json", "w") as f:
-                json.dump(cred_data, f)
-            client = vision.ImageAnnotatorClient.from_service_account_json("temp_credentials.json")
-            os.remove("temp_credentials.json")
-        else:
-            client = vision.ImageAnnotatorClient.from_service_account_json(google_credentials)
-        print("Google Cloud Vision inicializado correctamente")
-    except Exception as e:
-        print(f"Advertencia: No se pudo inicializar Google Cloud Vision: {str(e)}. Usando simulación.")
-else:
-    print("GOOGLE_APPLICATION_CREDENTIALS no está configurado. Usando simulación de IA.")
-
 # Configurar CORS para permitir solicitudes desde el frontend
 origins = [
     "http://localhost:3000",
@@ -101,19 +82,29 @@ class ReportRequest(BaseModel):
     risk_level: str
     comments: Optional[str] = None
 
+# Modelo para los datos de análisis de imágenes
+class ImageAnalysisRequest(BaseModel):
+    image_urls: Optional[List[str]] = None
+    files: Optional[List[UploadFile]] = None
+
 # Dependencia para obtener el usuario autenticado
-async def get_current_user(token: str = Depends(lambda: None)):
+async def get_current_user(authorization: str = Header(None)):
     uid = None
     try:
-        if not token:
-            raise HTTPException(status_code=401, detail="Token de autenticación requerido")
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Token de autenticación no proporcionado o inválido")
+        token = authorization.split("Bearer ")[1]
+        print(f"Token extraído del encabezado (completo): {token}")  # Depuración completa
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
         role = decoded_token.get('custom_claims', {}).get('role', 'user')
+        print(f"Token decodificado - UID: {uid}, Role: {role}")  # Depuración
         return {"uid": uid, "role": role}
-    except firebase_auth.InvalidIdTokenError:
+    except firebase_auth.InvalidIdTokenError as e:
+        print(f"Error al validar el token: {str(e)} - Token: {token[:50]}...")  # Depuración
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
     except Exception as e:
+        print(f"Error al verificar el token: {str(e)} - Token: {token[:50]}...")  # Depuración
         raise HTTPException(status_code=500, detail=f"Error al verificar el token: {str(e)}")
     finally:
         if uid is None:
@@ -170,21 +161,23 @@ app.include_router(admin.router, prefix="/api", tags=["Administración"])
 
 # Endpoint para análisis de imágenes con IA
 @app.post("/api/analyze_images")
-async def analyze_images(token: str = Depends(get_current_user), files: List[UploadFile] = File(None), image_urls: List[str] = None):
+async def analyze_images(token: dict = Depends(get_current_user), request_data: ImageAnalysisRequest = None):
     uid = token["uid"] if token else None
     try:
+        print(f"Token recibido en /api/analyze_images: {token}")
+        print(f"Datos recibidos en /api/analyze_images: {request_data.dict() if request_data else None}")
         # Validar que se envíen datos
-        if not files and not image_urls:
+        if not request_data.files and not request_data.image_urls:
             raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
-        if (files and len(files) > 2) or (image_urls and len(image_urls) > 2):
+        if (request_data.files and len(request_data.files) > 2) or (request_data.image_urls and len(request_data.image_urls) > 2):
             raise HTTPException(status_code=400, detail="Se permiten máximo 2 imágenes o URLs")
 
         image_content = None
-        if files and files[0]:
-            image_content = await files[0].read()
-        elif image_urls and image_urls[0]:
+        if request_data.files and request_data.files[0]:
+            image_content = await request_data.files[0].read()
+        elif request_data.image_urls and request_data.image_urls[0]:
             try:
-                response = requests.get(image_urls[0], timeout=10, headers={'Authorization': f'Bearer {token["uid"]}' if token else ''})
+                response = requests.get(request_data.image_urls[0], timeout=10)
                 response.raise_for_status()
                 image_content = response.content
             except requests.RequestException as e:
@@ -193,25 +186,22 @@ async def analyze_images(token: str = Depends(get_current_user), files: List[Upl
         if not image_content:
             raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
 
-        # Análisis con Google Cloud Vision si está disponible
-        if client:
-            try:
-                image = vision.Image(content=image_content)
-                response = client.label_detection(image=image)
-                labels = [label.description.lower() for label in response.label_annotations]
-                has_crack = any(keyword in labels for keyword in ["crack", "damage", "fracture", "deformation"])
-                evaluation = "Análisis preliminar: " + ("posible grieta o daño detectado" if has_crack else "ningún daño evidente detectado")
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error al procesar la imagen con Google Cloud Vision: {str(e)}")
-        else:
-            evaluation = "Análisis no disponible (Google Cloud Vision no configurado)"
-            has_crack = False
-
-        # Actualizar estado del usuario
-        if uid:
-            user_ref = firestore.client().collection('users').document(uid)
-            user_ref.set({'status': 'active', 'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
-            await users_collection.update_one({"_id": uid}, {"$set": {"status": "active", "last_seen": datetime.utcnow().isoformat() + "+00:00"}}, upsert=True)
+        # Análisis básico con OpenCV
+        image_array = np.frombuffer(image_content, np.uint8)
+        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 100, 200)  # Detección de bordes
+        has_crack = np.sum(edges) > 1000  # Umbral simple para detectar bordes significativos
+        evaluation = "Análisis básico: " + ("posibles grietas o daños detectados" if has_crack else "ningún daño evidente detectado")
+        
+        # Actualizar el reporte con el resultado de la IA
+        if request_data.image_urls and request_data.image_urls[0]:
+            report_id = request_data.image_urls[0].split('/api/reports/')[1].split('/')[0]  # Extraer ID del reporte
+            await users_collection.update_one(
+                {"report_id": report_id},
+                {"$set": {"data.evaluation": evaluation, "data.has_crack": has_crack}}
+            )
+            print(f"Reporte {report_id} actualizado con análisis: {evaluation}")
 
         return {"evaluation": evaluation, "has_crack": has_crack}
     except HTTPException as http_err:
@@ -226,7 +216,7 @@ async def analyze_images(token: str = Depends(get_current_user), files: List[Upl
 
 # Endpoint para subir reportes
 @app.post("/api/reports")
-async def create_report(token: str = Depends(get_current_user), report: ReportRequest = None, files: List[UploadFile] = File(None)):
+async def create_report(token: dict = Depends(get_current_user), report: ReportRequest = None, files: List[UploadFile] = File(None)):
     uid = token["uid"] if token else None
     try:
         # Verificar permisos
