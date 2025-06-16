@@ -198,7 +198,8 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             print(f"Contraste calculado: {contrast}")
             has_crack = bool(contrast > 50)  # Convertir a bool nativo de Python
             evaluation = "Análisis básico: " + ("posibles grietas o daños detectados" if has_crack else "ningún daño evidente detectado")
-            print(f"Evaluación: {evaluation}")
+            recommendation = "Acción: " + ("no requiere acción inmediata" if not has_crack else "revisar manualmente para confirmar daño")
+            print(f"Evaluación: {evaluation}, Recomendación: {recommendation}")
         except ValueError as ve:
             raise HTTPException(status_code=500, detail=f"Error de formato de imagen: {str(ve)}")
         except Exception as e:
@@ -209,11 +210,11 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             report_id = request_data.image_urls[0].split('/api/reports/')[1].split('/')[0]  # Extraer ID del reporte
             await users_collection.update_one(
                 {"report_id": report_id},
-                {"$set": {"data.evaluation": evaluation, "data.has_crack": has_crack}}
+                {"$set": {"data.evaluation": evaluation, "data.has_crack": has_crack, "data.recommendation": recommendation}}
             )
-            print(f"Reporte {report_id} actualizado con análisis: {evaluation}")
+            print(f"Reporte {report_id} actualizado con análisis: {evaluation}, recomendación: {recommendation}")
 
-        return {"evaluation": evaluation, "has_crack": has_crack}
+        return {"evaluation": evaluation, "has_crack": has_crack, "recommendation": recommendation}
     except HTTPException as http_err:
         raise http_err
     except Exception as e:
