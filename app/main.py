@@ -103,7 +103,7 @@ async def get_current_user(authorization: str = Header(None)):
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Token de autenticación no proporcionado o inválido")
         token = authorization.split("Bearer ")[1]
-        print(f"Token extraído del encabezado (completo): {token}")  # Depuración completa
+        print(f"Token extraído del encabezado: {token[:50]}...")  # Depuración parcial
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
         role = decoded_token.get('custom_claims', {}).get('role', 'user')
@@ -124,10 +124,10 @@ def ensure_admin_user():
     try:
         print("Verificando si existe admin@example.com...")
         user = firebase_auth.get_user_by_email("admin@example.com")
-        print("Usuario administrador ya existe:", user.email)
-        if 'role' not in (user.custom_claims or {}):
+        print(f"Usuario administrador encontrado: {user.email}, Claims: {user.custom_claims}")
+        if 'role' not in user.custom_claims or user.custom_claims.get('role') != 'admin':
             firebase_auth.set_custom_user_claims(user.uid, {'role': 'admin'})
-            print("Asignado custom claim 'role: admin' al usuario")
+            print("Asignado o actualizado custom claim 'role: admin' al usuario")
     except firebase_auth.UserNotFoundError:
         print("Creando usuario administrador...")
         admin_password = secrets.token_urlsafe(16)
@@ -247,6 +247,7 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
 @app.get("/api/admin/users")
 async def get_users(token: dict = Depends(get_current_user)):
     try:
+        print(f"Verificando rol para usuario con UID: {token['uid']}, Role: {token['role']}")  # Depuración
         if token["role"] != "admin":
             raise HTTPException(status_code=403, detail="Solo administradores pueden ver la lista de usuarios")
         users = []
@@ -258,6 +259,7 @@ async def get_users(token: dict = Depends(get_current_user)):
                 "role": user.get("role")
             }
             users.append(user_data)
+        print(f"Usuarios encontrados: {len(users)}")  # Depuración
         return users
     except HTTPException as http_err:
         raise http_err
@@ -268,6 +270,7 @@ async def get_users(token: dict = Depends(get_current_user)):
 @app.delete("/api/admin/users/{username}")
 async def delete_user(username: str, token: dict = Depends(get_current_user)):
     try:
+        print(f"Intentando eliminar usuario: {username}, Role: {token['role']}")  # Depuración
         if token["role"] != "admin":
             raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar usuarios")
         existing_user = await users_collection.find_one({"username": username})
@@ -289,6 +292,7 @@ async def delete_user(username: str, token: dict = Depends(get_current_user)):
 @app.post("/api/admin/users")
 async def create_user(token: dict = Depends(get_current_user), user: UserRequest = None):
     try:
+        print(f"Creando usuario con Role: {token['role']}")  # Depuración
         if token["role"] != "admin":
             raise HTTPException(status_code=403, detail="Solo administradores pueden crear usuarios")
         if not user:
