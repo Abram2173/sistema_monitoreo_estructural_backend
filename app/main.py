@@ -169,7 +169,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(reports.router, prefix="/api", tags=["Reportes"])
 app.include_router(admin.router, prefix="/api", tags=["Administración"])
 
-# Endpoint para análisis de imágenes con IA
+# Fragmento relevante de main.py (endpoint /api/analyze_images)
 @app.post("/api/analyze_images")
 async def analyze_images(token: dict = Depends(get_current_user), files: List[UploadFile] = File(None), image_urls: List[str] = None):
     uid = token["uid"] if token else None
@@ -185,7 +185,6 @@ async def analyze_images(token: dict = Depends(get_current_user), files: List[Up
             image_content = await files[0].read()
         elif image_urls and image_urls[0]:
             try:
-                # Usar la URL completa y agregar autorización si es necesario
                 response = requests.get(image_urls[0], timeout=10, headers={'Authorization': f'Bearer {token["uid"]}' if token else ''})
                 response.raise_for_status()
                 image_content = response.content
@@ -207,7 +206,7 @@ async def analyze_images(token: dict = Depends(get_current_user), files: List[Up
                 raise HTTPException(status_code=500, detail=f"Error al procesar la imagen con Google Cloud Vision: {str(e)}")
         else:
             evaluation = "Simulación de IA: Análisis no disponible (Google Cloud Vision no configurado)"
-            has_crack = False  # Simulación básica
+            has_crack = False
 
         # Actualizar estado del usuario
         if uid:
