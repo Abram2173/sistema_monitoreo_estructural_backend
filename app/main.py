@@ -199,7 +199,11 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             has_crack = bool(contrast > 50)  # Convertir a bool nativo de Python
             evaluation = f"Análisis básico: {'posibles grietas o daños detectados' if has_crack else 'ningún daño evidente detectado'} (contraste: {contrast:.2f})"
             recommendation = f"Acción: {'revisar manualmente para confirmar daño' if has_crack else 'continuar monitoreo rutinario'}"
-            print(f"Evaluación: {evaluation}, Recomendación: {recommendation}")
+            description = (
+                f"Descripción: La imagen muestra una estructura con un contraste de {contrast:.2f}. "
+                f"{'Se observan variaciones que podrían indicar grietas o daños; se recomienda una inspección detallada.' if has_crack else 'La superficie parece uniforme sin indicios claros de daño; el monitoreo rutinario es suficiente.'}"
+            )
+            print(f"Evaluación: {evaluation}, Recomendación: {recommendation}, Descripción: {description}")
         except ValueError as ve:
             raise HTTPException(status_code=500, detail=f"Error de formato de imagen: {str(ve)}")
         except Exception as e:
@@ -210,11 +214,11 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             report_id = request_data.image_urls[0].split('/api/reports/')[1].split('/')[0]  # Extraer ID del reporte
             await users_collection.update_one(
                 {"report_id": report_id},
-                {"$set": {"data.evaluation": evaluation, "data.has_crack": has_crack, "data.recommendation": recommendation}}
+                {"$set": {"data.evaluation": evaluation, "data.has_crack": has_crack, "data.recommendation": recommendation, "data.description": description}}
             )
-            print(f"Reporte {report_id} actualizado con análisis: {evaluation}, recomendación: {recommendation}")
+            print(f"Reporte {report_id} actualizado con análisis: {evaluation}, recomendación: {recommendation}, descripción: {description}")
 
-        return {"evaluation": evaluation, "has_crack": has_crack, "recommendation": recommendation}
+        return {"evaluation": evaluation, "has_crack": has_crack, "recommendation": recommendation, "description": description}
     except HTTPException as http_err:
         raise http_err
     except Exception as e:
