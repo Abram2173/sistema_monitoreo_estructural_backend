@@ -158,6 +158,12 @@ async def update_users_last_activity():
 async def startup_event():
     print("Ejecutando evento de startup...")
     ensure_admin_user()
+    # Limpiar duplicados de "admin" al inicio
+    admin_users = await users_collection.find({"username": "admin"}).to_list(None)
+    if len(admin_users) > 1:
+        for user in admin_users[1:]:
+            await users_collection.delete_one({"_id": user["_id"]})
+            print(f"Duplicado de admin eliminado: {user['_id']}")
     if os.getenv("INITIAL_UPDATE_DONE", "false") == "false":
         await update_users_last_activity()
         os.environ["INITIAL_UPDATE_DONE"] = "true"
