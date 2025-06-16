@@ -191,6 +191,7 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
         # Análisis básico con Pillow y numpy
         try:
             image = Image.open(io.BytesIO(image_content))
+            print(f"Imagen abierta con éxito, formato: {image.format}, tamaño: {image.size}")
             image_array = np.array(image.convert('L'))  # Convertir a escala de grises
             print(f"Imagen convertida a escala de grises, forma: {image_array.shape}")
             contrast = np.std(image_array)  # Desviación estándar como medida de contraste
@@ -198,6 +199,8 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             has_crack = contrast > 50  # Umbral simple para detectar cambios abruptos
             evaluation = "Análisis básico: " + ("posibles grietas o daños detectados" if has_crack else "ningún daño evidente detectado")
             print(f"Evaluación: {evaluation}")
+        except ValueError as ve:
+            raise HTTPException(status_code=500, detail=f"Error de formato de imagen: {str(ve)}")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error al procesar la imagen: {str(e)}")
 
