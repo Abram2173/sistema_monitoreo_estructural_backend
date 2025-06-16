@@ -14,7 +14,7 @@ import asyncio
 from app.config.database import users_collection
 from datetime import datetime
 import requests
-import cv2
+from PIL import Image
 import numpy as np
 import uuid
 
@@ -186,12 +186,11 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
         if not image_content:
             raise HTTPException(status_code=400, detail="No se proporcionó una imagen válida")
 
-        # Análisis básico con OpenCV
-        image_array = np.frombuffer(image_content, np.uint8)
-        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 100, 200)  # Detección de bordes
-        has_crack = np.sum(edges) > 1000  # Umbral simple para detectar bordes significativos
+        # Análisis básico con Pillow y numpy
+        image = Image.open(io.BytesIO(image_content))
+        image_array = np.array(image.convert('L'))  # Convertir a escala de grises
+        contrast = np.std(image_array)  # Desviación estándar como medida de contraste
+        has_crack = contrast > 50  # Umbral simple para detectar cambios abruptos
         evaluation = "Análisis básico: " + ("posibles grietas o daños detectados" if has_crack else "ningún daño evidente detectado")
         
         # Actualizar el reporte con el resultado de la IA
@@ -264,5 +263,6 @@ async def create_report(token: dict = Depends(get_current_user), report: ReportR
 
 if __name__ == "__main__":
     import uvicorn
+    import io
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
