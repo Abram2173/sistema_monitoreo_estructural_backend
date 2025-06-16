@@ -197,8 +197,8 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             contrast = np.std(image_array)  # Desviación estándar como medida de contraste
             print(f"Contraste calculado: {contrast}")
             has_crack = bool(contrast > 50)  # Convertir a bool nativo de Python
-            evaluation = "Análisis básico: " + ("posibles grietas o daños detectados" if has_crack else "ningún daño evidente detectado")
-            recommendation = "Acción: " + ("no requiere acción inmediata" if not has_crack else "revisar manualmente para confirmar daño")
+            evaluation = f"Análisis básico: {'posibles grietas o daños detectados' if has_crack else 'ningún daño evidente detectado'} (contraste: {contrast:.2f})"
+            recommendation = f"Acción: {'revisar manualmente para confirmar daño' if has_crack else 'continuar monitoreo rutinario'}"
             print(f"Evaluación: {evaluation}, Recomendación: {recommendation}")
         except ValueError as ve:
             raise HTTPException(status_code=500, detail=f"Error de formato de imagen: {str(ve)}")
