@@ -174,6 +174,9 @@ app.include_router(admin.router, prefix="/api", tags=["Administración"])
 async def analyze_images(token: dict = Depends(get_current_user), files: List[UploadFile] = File(None), image_urls: List[str] = None):
     uid = token["uid"] if token else None
     try:
+        print(f"Token recibido en /api/analyze_images: {token}")
+        if not token:
+            raise HTTPException(status_code=401, detail="Token de autenticación no proporcionado")
         # Validar que se envíen datos
         if not files and not image_urls:
             raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
