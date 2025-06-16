@@ -229,6 +229,42 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             user_ref.set({'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
             await users_collection.update_one({"_id": uid}, {"$set": {"last_seen": datetime.utcnow().isoformat() + "+00:00"}}, upsert=True)
 
+# Endpoint para obtener reportes
+@app.get("/api/reports")
+async def get_reports(token: dict = Depends(get_current_user), assigned_supervisor: Optional[str] = None):
+    try:
+        print(f"Token recibido en /api/reports: {token}")
+        email = firebase_auth.get_user(token["uid"]).email
+        print(f"Email extraído del token: {email}")
+        role = token["role"]
+        print(f"Rol extraído para {email}: {role}")
+        print(f"Verificando acceso a reportes para {email}, rol: {role}")
+
+        if role not in ["supervisor", "admin"]:
+            raise HTTPException(status_code=403, detail="Acceso denegado. Solo supervisores y administradores pueden ver reportes.")
+
+        query = {}
+        if assigned_supervisor:
+            query["data.assigned_supervisor"] = assigned_supervisor
+        elif role == "supervisor":
+            query["data.assigned_supervisor"] = email
+
+        print(f"Obteniendo reportes para supervisor: {email if role == 'supervisor' else assigned_supervisor}")
+        reports = []
+        async for report in users_collection.find(query):
+            report_data = report.get("data", {})
+            report_data["id"] = report["report_id"]
+            report_data["inspector_id"] = report["inspector_id"]
+            report_data["inspector_name"] = await get_inspector_name(report["inspector_id"])  # Función hipotética
+            reports.append(report_data)
+            print(f"Reporte procesado: {report_data}")
+        print(f"Reportes devueltos: {len(reports)}")
+        return reports
+    except HTTPException as http_err:
+        raise http_err
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener reportes: {str(e)}")
+
 # Endpoint para subir reportes
 @app.post("/api/reports")
 async def create_report(token: dict = Depends(get_current_user), report: ReportRequest = None, files: List[UploadFile] = File(None)):
@@ -276,6 +312,11 @@ async def create_report(token: dict = Depends(get_current_user), report: ReportR
             user_ref = firestore.client().collection('users').document(uid)
             user_ref.set({'last_seen': firestore.SERVER_TIMESTAMP}, merge=True)
             await users_collection.update_one({"_id": uid}, {"$set": {"last_seen": datetime.utcnow().isoformat() + "+00:00"}}, upsert=True)
+
+# Función hipotética para obtener el nombre del inspector (ajustar según tu implementación)
+async def get_inspector_name(inspector_id):
+    # Implementa esta lógica según tu base de datos
+    return "Juan"  # Ejemplo
 
 if __name__ == "__main__":
     import uvicorn
