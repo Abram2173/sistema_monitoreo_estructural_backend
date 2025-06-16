@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, reports, admin
 import firebase_admin
@@ -103,18 +103,22 @@ class ReportRequest(BaseModel):
     comments: Optional[str] = None
 
 # Dependencia para obtener el usuario autenticado
-async def get_current_user(token: str = Depends(lambda: None)):
+async def get_current_user(authorization: str = Header(None)):
     uid = None
     try:
-        if not token:
-            raise HTTPException(status_code=401, detail="Token de autenticación requerido")
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Token de autenticación no proporcionado o inválido")
+        token = authorization.split("Bearer ")[1]
+        print(f"Token extraído del encabezado: {token[:50]}...")  # Depuración
         decoded_token = firebase_auth.verify_id_token(token)
         uid = decoded_token['uid']
         role = decoded_token.get('custom_claims', {}).get('role', 'user')
         return {"uid": uid, "role": role}
-    except firebase_auth.InvalidIdTokenError:
+    except firebase_auth.InvalidIdTokenError as e:
+        print(f"Error al validar el token: {str(e)}")
         raise HTTPException(status_code=401, detail="Token de autenticación inválido")
     except Exception as e:
+        print(f"Error al verificar el token: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al verificar el token: {str(e)}")
     finally:
         if uid is None:
@@ -169,14 +173,12 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(reports.router, prefix="/api", tags=["Reportes"])
 app.include_router(admin.router, prefix="/api", tags=["Administración"])
 
-# Fragmento relevante de main.py (endpoint /api/analyze_images)
+# Endpoint para análisis de imágenes con IA
 @app.post("/api/analyze_images")
 async def analyze_images(token: dict = Depends(get_current_user), files: List[UploadFile] = File(None), image_urls: List[str] = None):
     uid = token["uid"] if token else None
     try:
         print(f"Token recibido en /api/analyze_images: {token}")
-        if not token:
-            raise HTTPException(status_code=401, detail="Token de autenticación no proporcionado")
         # Validar que se envíen datos
         if not files and not image_urls:
             raise HTTPException(status_code=400, detail="Se requieren archivos o URLs de imágenes")
