@@ -196,7 +196,7 @@ async def analyze_images(token: dict = Depends(get_current_user), request_data: 
             print(f"Imagen convertida a escala de grises, forma: {image_array.shape}")
             contrast = np.std(image_array)  # Desviación estándar como medida de contraste
             print(f"Contraste calculado: {contrast}")
-            has_crack = contrast > 50  # Umbral simple para detectar cambios abruptos
+            has_crack = bool(contrast > 50)  # Convertir a bool nativo de Python
             evaluation = "Análisis básico: " + ("posibles grietas o daños detectados" if has_crack else "ningún daño evidente detectado")
             print(f"Evaluación: {evaluation}")
         except ValueError as ve:
