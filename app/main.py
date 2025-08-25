@@ -18,7 +18,7 @@ from PIL import Image
 import numpy as np
 import io
 import uuid
-
+ 
 app = FastAPI(
     title="Sistema de Monitoreo Estructural",
     description="API para gestionar reportes de monitoreo estructural con autenticación de usuarios e IA básica.",
